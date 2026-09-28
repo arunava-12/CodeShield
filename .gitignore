@@ -1,5 +1,5 @@
+# Terraform
 .terraform/
-.terraform.lock.hcl
 
 terraform.tfstate
 terraform.tfstate.backup
@@ -8,12 +8,17 @@ terraform.tfstate.backup
 terraform.tfvars
 *.auto.tfvars
 
+*.tfplan
+tfplan
+
 crash.log
 crash.*.log
 
+# AWS / SSH credentials
 *.pem
 *.ppk
 
+# IDE / OS files
 .DS_Store
 .idea/
 .vscode/
