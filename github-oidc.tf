@@ -36,7 +36,7 @@ resource "aws_iam_role" "github_actions" {
           }
 
           StringLike = {
-            "token.actions.githubusercontent.com:sub" = "repo:arunava-12/CodeShield:ref:refs/heads/*"
+            "token.actions.githubusercontent.com:sub" = "repo:arunava-12@134119030/CodeShield@1351768082:ref:refs/heads/*"
           }
         }
       }

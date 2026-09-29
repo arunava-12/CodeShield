@@ -52,10 +52,12 @@ jobs:
           severity: 'CRITICAL,HIGH'
 
       - name: Configure AWS credentials
+        if: github.event_name == 'push'
         uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: arn:aws:iam::851725640243:role/CodeShield-github-actions-role
           aws-region: ap-south-1
 
       - name: Verify AWS identity
+        if: github.event_name == 'push'
         run: aws sts get-caller-identity
