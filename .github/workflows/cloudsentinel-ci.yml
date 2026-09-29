@@ -61,3 +61,19 @@ jobs:
       - name: Verify AWS identity
         if: github.event_name == 'push'
         run: aws sts get-caller-identity
+
+      - name: Login to Amazon ECR
+        if: github.event_name == 'push'
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Tag Docker image
+        if: github.event_name == 'push'
+        run: |
+          docker tag codeshield:test 851725640243.dkr.ecr.ap-south-1.amazonaws.com/codeshield:${{ github.sha }}
+          docker tag codeshield:test 851725640243.dkr.ecr.ap-south-1.amazonaws.com/codeshield:latest
+
+      - name: Push Docker image to ECR
+        if: github.event_name == 'push'
+        run: |
+          docker push 851725640243.dkr.ecr.ap-south-1.amazonaws.com/codeshield:${{ github.sha }}
+          docker push 851725640243.dkr.ecr.ap-south-1.amazonaws.com/codeshield:latest
