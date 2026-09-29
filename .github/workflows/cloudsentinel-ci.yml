@@ -77,3 +77,50 @@ jobs:
         run: |
           docker push 851725640243.dkr.ecr.ap-south-1.amazonaws.com/codeshield:${{ github.sha }}
           docker push 851725640243.dkr.ecr.ap-south-1.amazonaws.com/codeshield:latest
+
+      - name: Deploy to EC2 via SSM
+        if: github.event_name == 'push'
+        run: |
+          COMMAND_ID=$(aws ssm send-command \
+            --region ap-south-1 \
+            --instance-ids i-05798790401bee11c \
+            --document-name "AWS-RunShellScript" \
+            --parameters '{
+              "commands": [
+                "aws ecr get-login-password --region ap-south-1 | docker login --username AWS --password-stdin 851725640243.dkr.ecr.ap-south-1.amazonaws.com",
+                "docker pull 851725640243.dkr.ecr.ap-south-1.amazonaws.com/codeshield:${{ github.sha }}",
+                "docker rm -f codeshield || true",
+                "docker run -d --name codeshield -p 80:5000 --restart unless-stopped 851725640243.dkr.ecr.ap-south-1.amazonaws.com/codeshield:${{ github.sha }}",
+                "sleep 10",
+                "curl -fsS http://localhost/health"
+              ]
+            }' \
+            --query "Command.CommandId" \
+            --output text)
+
+          echo "SSM Command ID: $COMMAND_ID"
+
+          aws ssm wait command-executed \
+            --region ap-south-1 \
+            --command-id "$COMMAND_ID" \
+            --instance-id i-05798790401bee11c
+
+          STATUS=$(aws ssm get-command-invocation \
+            --region ap-south-1 \
+            --command-id "$COMMAND_ID" \
+            --instance-id i-05798790401bee11c \
+            --query "Status" \
+            --output text)
+
+          echo "Deployment status: $STATUS"
+
+          if [ "$STATUS" != "Success" ]; then
+            echo "EC2 deployment failed"
+            aws ssm get-command-invocation \
+              --region ap-south-1 \
+              --command-id "$COMMAND_ID" \
+              --instance-id i-05798790401bee11c
+            exit 1
+          fi
+
+          echo "EC2 deployment successful"
