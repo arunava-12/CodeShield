@@ -3,676 +3,540 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
+    <meta name="theme-color" content="#0b1120">
     <title>CodeShield | Security Control Center</title>
-
     <style>
-        * {
-            box-sizing: border-box;
+        :root {
+            color-scheme: dark;
+            --bg: #080d19;
+            --panel: #111827;
+            --panel-soft: #0b1120;
+            --border: #253148;
+            --text: #e5e7eb;
+            --muted: #9ca3af;
+            --accent: #818cf8;
+            --green: #6ee7b7;
+            --red: #fda4af;
+            --amber: #fcd34d;
+            --blue: #93c5fd;
         }
-
+        * { box-sizing: border-box; }
         body {
             margin: 0;
-            font-family: Arial, sans-serif;
-            background: #0b1120;
-            color: #e5e7eb;
-        }
-
-        .header {
-            background: #111827;
-            border-bottom: 1px solid #1f2937;
-            padding: 24px 40px;
-        }
-
-        .header-inner {
-            max-width: 1200px;
-            margin: auto;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .brand h1 {
-            margin: 0;
-            font-size: 28px;
-        }
-
-        .brand p {
-            margin: 6px 0 0;
-            color: #9ca3af;
-        }
-
-        .status {
-            padding: 8px 14px;
-            border-radius: 20px;
-            background: #064e3b;
-            color: #6ee7b7;
-            font-size: 13px;
-            font-weight: bold;
-        }
-
-        .container {
-            max-width: 1200px;
-            margin: 30px auto;
-            padding: 0 20px;
-        }
-
-        .metrics {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 16px;
-            margin-bottom: 20px;
-        }
-
-        .metric {
-            background: #111827;
-            border: 1px solid #1f2937;
-            border-radius: 12px;
-            padding: 20px;
-        }
-
-        .metric-label {
-            color: #9ca3af;
-            font-size: 13px;
-            margin-bottom: 10px;
-        }
-
-        .metric-value {
-            font-size: 28px;
-            font-weight: bold;
-        }
-
-        .section {
-            background: #111827;
-            border: 1px solid #1f2937;
-            border-radius: 12px;
-            padding: 24px;
-            margin-bottom: 20px;
-        }
-
-        .section h2 {
-            margin-top: 0;
-            margin-bottom: 8px;
-        }
-
-        .section-description {
-            color: #9ca3af;
-            margin-bottom: 20px;
-        }
-
-        .scan-form {
-            display: grid;
-            grid-template-columns: 1fr 200px 150px;
-            gap: 12px;
-        }
-
-        input,
-        select {
-            width: 100%;
-            padding: 13px;
-            background: #0b1120;
-            border: 1px solid #374151;
-            border-radius: 8px;
-            color: white;
-            font-size: 14px;
-        }
-
-        button {
-            border: none;
-            border-radius: 8px;
-            background: #4f46e5;
-            color: white;
-            font-weight: bold;
-            cursor: pointer;
-            font-size: 14px;
-        }
-
-        button:hover {
-            background: #4338ca;
-        }
-
-        button:disabled {
-            background: #374151;
-            cursor: not-allowed;
-        }
-
-        .scan-status {
-            display: none;
-            margin-top: 15px;
-            padding: 12px;
-            border-radius: 8px;
-            background: #1f2937;
-            color: #d1d5db;
-        }
-
-        .results {
-            display: none;
-            margin-top: 20px;
-        }
-
-        .score-box {
-            display: flex;
-            align-items: center;
-            gap: 20px;
-            padding: 20px;
-            background: #0b1120;
-            border-radius: 10px;
-            margin-bottom: 20px;
-        }
-
-        .score {
-            font-size: 48px;
-            font-weight: bold;
-        }
-
-        .score-label {
-            color: #9ca3af;
-        }
-
-        .findings {
-            display: grid;
-            gap: 12px;
-        }
-
-        .finding {
-            border: 1px solid #374151;
-            border-radius: 10px;
-            padding: 18px;
-            background: #0b1120;
-        }
-
-        .finding-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 8px;
-        }
-
-        .finding-title {
-            font-weight: bold;
-            font-size: 16px;
-        }
-
-        .severity {
-            padding: 5px 9px;
-            border-radius: 6px;
-            font-size: 11px;
-            font-weight: bold;
-        }
-
-        .HIGH {
-            background: #7f1d1d;
-            color: #fecaca;
-        }
-
-        .MEDIUM {
-            background: #78350f;
-            color: #fde68a;
-        }
-
-        .LOW {
-            background: #1e3a8a;
-            color: #bfdbfe;
-        }
-
-        .finding p {
-            margin: 8px 0;
-            color: #9ca3af;
+            background: radial-gradient(ellipse at top left, #17203b 0, var(--bg) 42%);
+            color: var(--text);
+            font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
             line-height: 1.5;
         }
-
-        .finding-source {
-            color: #818cf8;
-            font-size: 12px;
-        }
-
-        .pipeline {
-            display: grid;
-            grid-template-columns: repeat(5, 1fr);
-            gap: 12px;
-        }
-
-        .pipeline-stage {
-            background: #0b1120;
-            border: 1px solid #1f2937;
-            border-radius: 10px;
-            padding: 18px;
-        }
-
-        .pipeline-stage strong {
-            display: block;
-            margin-bottom: 8px;
-        }
-
-        .passed {
-            color: #6ee7b7;
-            font-size: 13px;
-        }
-
-        .info-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 15px;
-        }
-
-        .info-card {
-            background: #0b1120;
-            border: 1px solid #1f2937;
-            border-radius: 10px;
-            padding: 18px;
-        }
-
-        .info-card strong {
-            display: block;
-            margin-bottom: 8px;
-        }
-
-        .info-card span {
-            color: #9ca3af;
-        }
-
-        .footer {
-            text-align: center;
-            padding: 30px;
-            color: #6b7280;
-        }
-
+        button, input, select { font: inherit; }
+        button { cursor: pointer; }
+        .header { border-bottom: 1px solid var(--border); background: rgba(12, 18, 32, .92); }
+        .header-inner, main, .footer-inner { width: min(1200px, calc(100% - 40px)); margin: 0 auto; }
+        .header-inner { min-height: 94px; display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+        .brand { display: flex; align-items: center; gap: 14px; }
+        .brand-mark { display: grid; place-items: center; width: 46px; height: 46px; border: 1px solid #4545a9; border-radius: 14px; background: #242451; font-size: 24px; }
+        h1, h2, h3, p { margin-top: 0; }
+        h1 { margin-bottom: 2px; font-size: 25px; letter-spacing: -.04em; }
+        .subtitle, .muted { color: var(--muted); }
+        .subtitle { margin: 0; font-size: 13px; }
+        .service-status { display: inline-flex; align-items: center; gap: 9px; padding: 8px 12px; border: 1px solid #225b4c; border-radius: 999px; background: #0d2a25; color: var(--green); font-size: 12px; font-weight: 750; white-space: nowrap; }
+        .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+        main { padding: 30px 0 46px; }
+        .page-intro { display: flex; justify-content: space-between; align-items: end; gap: 20px; margin-bottom: 22px; }
+        .eyebrow { margin-bottom: 6px; color: var(--accent); font-size: 11px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+        .page-intro h2 { margin-bottom: 5px; font-size: clamp(23px, 3vw, 30px); letter-spacing: -.04em; }
+        .page-intro p { margin-bottom: 0; color: var(--muted); font-size: 14px; }
+        .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
+        .metric, .panel { border: 1px solid var(--border); border-radius: 15px; background: rgba(17, 24, 39, .92); box-shadow: 0 12px 30px rgba(0, 0, 0, .12); }
+        .metric { padding: 19px; min-width: 0; }
+        .metric-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+        .metric-icon { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 10px; background: #202847; color: #c7d2fe; font-size: 15px; }
+        .metric-value { margin-top: 14px; font-size: 30px; line-height: 1.2; font-weight: 800; letter-spacing: -.04em; overflow-wrap: anywhere; }
+        .metric-note { margin-top: 7px; color: var(--muted); font-size: 12px; }
+        .panel { padding: 23px; margin-bottom: 18px; }
+        .panel-heading { display: flex; justify-content: space-between; align-items: start; gap: 18px; margin-bottom: 18px; }
+        .panel-heading h2 { margin-bottom: 5px; font-size: 18px; letter-spacing: -.02em; }
+        .panel-heading p { margin-bottom: 0; color: var(--muted); font-size: 13px; }
+        .scan-form { display: grid; grid-template-columns: minmax(0, 1fr) 190px 145px; gap: 10px; }
+        input, select { width: 100%; min-width: 0; padding: 12px 13px; border: 1px solid #354158; border-radius: 9px; outline: none; background: var(--panel-soft); color: var(--text); }
+        input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(129, 140, 248, .15); }
+        input::placeholder { color: #778198; }
+        .button { display: inline-flex; justify-content: center; align-items: center; gap: 8px; padding: 12px 15px; border: 1px solid transparent; border-radius: 9px; background: #4f46e5; color: white; font-weight: 750; transition: background .15s ease, transform .15s ease; }
+        .button:hover { background: #4338ca; }
+        .button:active { transform: translateY(1px); }
+        .button:disabled { opacity: .65; cursor: wait; }
+        .button-secondary { border-color: var(--border); background: #151e31; color: var(--text); }
+        .button-secondary:hover { background: #202b42; }
+        .scan-status { display: none; margin-top: 14px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel-soft); font-size: 13px; overflow-wrap: anywhere; }
+        .scan-status[data-kind="success"] { border-color: #225b4c; color: var(--green); }
+        .scan-status[data-kind="error"] { border-color: #713342; color: var(--red); }
+        .scan-status[data-kind="info"] { color: var(--blue); }
+        .results { display: none; margin-top: 22px; }
+        .results-header { display: flex; justify-content: space-between; align-items: center; gap: 14px; margin-bottom: 14px; }
+        .results-header h3 { margin: 0; font-size: 16px; }
+        .results-header-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 10px; }
+        .results-meta { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+        .download-report { padding: 8px 11px; font-size: 12px; }
+        .score-box { display: grid; grid-template-columns: 130px minmax(0, 1fr); align-items: center; gap: 20px; padding: 20px; margin-bottom: 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel-soft); }
+        .score { font-size: 48px; font-weight: 850; letter-spacing: -.05em; line-height: 1; }
+        .score-label { margin-top: 7px; color: var(--muted); font-size: 12px; }
+        .score-description { margin: 0; font-weight: 700; overflow-wrap: anywhere; }
+        .score-summary { margin: 5px 0 0; color: var(--muted); font-size: 13px; }
+        .severity-summary { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 18px; }
+        .count-pill { padding: 5px 9px; border: 1px solid var(--border); border-radius: 7px; color: var(--muted); font-size: 11px; font-weight: 800; }
+        .count-pill.critical, .severity.CRITICAL { background: #581c2b; color: #fda4af; }
+        .count-pill.high, .severity.HIGH { background: #7f1d1d; color: #fecaca; }
+        .count-pill.medium, .severity.MEDIUM { background: #78350f; color: #fde68a; }
+        .count-pill.low, .severity.LOW { background: #1e3a8a; color: #bfdbfe; }
+        .findings-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; }
+        .findings-toolbar h3 { margin: 0; }
+        .filter-control { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 12px; }
+        .filter-control select { width: auto; min-width: 155px; padding: 8px 10px; }
+        .findings { display: grid; gap: 10px; }
+        .finding { padding: 16px; border: 1px solid #303c52; border-radius: 11px; background: var(--panel-soft); min-width: 0; }
+        .finding-header { display: flex; justify-content: space-between; align-items: start; gap: 14px; margin-bottom: 8px; }
+        .finding-title { font-size: 14px; font-weight: 800; overflow-wrap: anywhere; }
+        .severity { flex: 0 0 auto; padding: 4px 7px; border-radius: 6px; font-size: 10px; font-weight: 850; }
+        .finding-description { margin: 0 0 10px; color: #b4bdcc; font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; white-space: pre-wrap; }
+        .finding-source { color: #a5b4fc; font-size: 11px; overflow-wrap: anywhere; }
+        .finding-metadata { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; margin-top: 12px; }
+        .finding-meta-item { min-width: 0; padding: 9px 10px; border: 1px solid var(--border); border-radius: 8px; background: rgba(17, 24, 39, .65); }
+        .finding-meta-label { display: block; margin-bottom: 3px; color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+        .finding-meta-value { display: block; color: var(--text); font-size: 12px; overflow-wrap: anywhere; }
+        .severity.UNKNOWN { background: #374151; color: #e5e7eb; }
+        .empty-state { padding: 26px 18px; border: 1px dashed #354158; border-radius: 11px; text-align: center; color: var(--muted); }
+        .empty-state strong { display: block; margin-bottom: 5px; color: var(--green); }
+        .pipeline { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+        .pipeline-stage { padding: 15px; border: 1px solid var(--border); border-radius: 11px; background: var(--panel-soft); min-width: 0; }
+        .stage-title { margin-bottom: 8px; font-size: 13px; font-weight: 800; }
+        .stage-status { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; font-weight: 750; }
+        .stage-status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+        .stage-status.unknown { color: var(--amber); }
+        .pipeline-note { margin: 14px 0 0; color: var(--muted); font-size: 12px; }
+        .info-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+        .info-card { padding: 15px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-soft); min-width: 0; }
+        .info-card strong { display: block; margin-bottom: 5px; font-size: 12px; }
+        .info-card span { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+        .footer { padding: 24px 0; border-top: 1px solid var(--border); color: #778198; text-align: center; font-size: 12px; }
+        .footer-inner { display: flex; justify-content: space-between; gap: 15px; }
         @media (max-width: 900px) {
-            .metrics {
-                grid-template-columns: repeat(2, 1fr);
-            }
-
-            .scan-form {
-                grid-template-columns: 1fr;
-            }
-
-            .pipeline {
-                grid-template-columns: 1fr 1fr;
-            }
-
-            .info-grid {
-                grid-template-columns: 1fr 1fr;
-            }
+            .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .pipeline { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+            .scan-form { grid-template-columns: minmax(0, 1fr) 180px; }
+            .scan-form .button { grid-column: 1 / -1; }
         }
-
         @media (max-width: 600px) {
-            .header-inner {
-                flex-direction: column;
-                gap: 15px;
-                align-items: flex-start;
-            }
-
-            .metrics,
-            .info-grid,
-            .pipeline {
-                grid-template-columns: 1fr;
-            }
+            .header-inner, main, .footer-inner { width: min(100% - 28px, 1200px); }
+            .header-inner { padding: 16px 0; align-items: flex-start; flex-direction: column; gap: 13px; }
+            .page-intro { align-items: flex-start; flex-direction: column; }
+            .metric { padding: 15px; }
+            .metric-value { font-size: 25px; }
+            .panel { padding: 17px; }
+            .scan-form, .pipeline, .info-grid { grid-template-columns: 1fr; }
+            .scan-form .button { grid-column: auto; }
+            .score-box { grid-template-columns: 1fr; gap: 14px; }
+            .score { font-size: 42px; }
+            .footer-inner { flex-direction: column; }
         }
+        @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; scroll-behavior: auto !important; } }
     </style>
 </head>
-
 <body>
-
 <header class="header">
     <div class="header-inner">
-
         <div class="brand">
-            <h1>🛡️ CodeShield</h1>
-            <p>DevSecOps Security Control Center</p>
+            <div class="brand-mark" aria-hidden="true">🛡️</div>
+            <div>
+                <h1>CodeShield</h1>
+                <p class="subtitle">DevSecOps Security Control Center</p>
+            </div>
         </div>
-
-        <div class="status">
-            ● SERVICE OPERATIONAL
-        </div>
-
+        <div class="service-status"><span class="dot" aria-hidden="true"></span> API SERVICE · <span id="serviceStatus">CHECKING</span></div>
     </div>
 </header>
-
-<main class="container">
-
-    <!-- Metrics -->
-
-    <section class="metrics">
-
-        <div class="metric">
-            <div class="metric-label">SECURITY SCORE</div>
-            <div class="metric-value" id="securityScore">84</div>
+<main>
+    <section class="page-intro">
+        <div>
+            <div class="eyebrow">Security overview</div>
+            <h2>Security Control Center</h2>
+            <p>Scan repositories and review security findings from one workspace.</p>
         </div>
-
-        <div class="metric">
-            <div class="metric-label">OPEN FINDINGS</div>
-            <div class="metric-value" id="openFindings">4</div>
-        </div>
-
-        <div class="metric">
-            <div class="metric-label">PIPELINE</div>
-            <div class="metric-value">PASSING</div>
-        </div>
-
-        <div class="metric">
-            <div class="metric-label">VERSION</div>
-            <div class="metric-value">{{ version }}</div>
-        </div>
-
+        <button class="button button-secondary" id="refreshHealth" type="button">↻ Check service</button>
     </section>
 
+    <section class="metrics" aria-label="Security metrics">
+        <article class="metric">
+            <div class="metric-top"><span>Security score</span><span class="metric-icon" aria-hidden="true">◈</span></div>
+            <div class="metric-value" id="securityScore">—</div>
+            <div class="metric-note">Available after a scan</div>
+        </article>
+        <article class="metric">
+            <div class="metric-top"><span>Findings</span><span class="metric-icon" aria-hidden="true">⌕</span></div>
+            <div class="metric-value" id="openFindings">—</div>
+            <div class="metric-note">Latest scan result</div>
+        </article>
+        <article class="metric">
+            <div class="metric-top"><span>Pipeline</span><span class="metric-icon" aria-hidden="true">⇄</span></div>
+            <div class="metric-value" id="pipelineStatus" style="font-size:21px">NOT CONNECTED</div>
+            <div class="metric-note">Live workflow status is not integrated</div>
+        </article>
+        <article class="metric">
+            <div class="metric-top"><span>Version</span><span class="metric-icon" aria-hidden="true">⌘</span></div>
+            <div class="metric-value" id="appVersion">{{ version }}</div>
+            <div class="metric-note">CodeShield application</div>
+        </article>
+    </section>
 
-    <!-- Security Scanner -->
-
-    <section class="section">
-
-        <h2>🔍 Run Security Check</h2>
-
-        <p class="section-description">
-            Run a security assessment against a repository, container image,
-            or application endpoint.
-        </p>
-
+    <section class="panel" aria-labelledby="scannerHeading">
+        <div class="panel-heading">
+            <div>
+                <h2 id="scannerHeading">Run a security scan</h2>
+                <p>Choose a target type and submit it for assessment.</p>
+            </div>
+        </div>
         <form id="scanForm" class="scan-form">
-
-            <input
-                id="target"
-                type="text"
-                placeholder="Enter repository, image, or endpoint"
-                required
-            >
-
-            <select id="scanType">
-
-                <option value="repo">
-                    Repository
-                </option>
-
-                <option value="container">
-                    Container Image
-                </option>
-
-                <option value="endpoint">
-                    Endpoint
-                </option>
-
+            <input id="target" name="target" type="text" placeholder="https://github.com/owner/repository" aria-label="Scan target" autocomplete="url" required>
+            <select id="scanType" name="scan_type" aria-label="Scan type">
+                <option value="repo">GitHub repository</option>
+                <option value="container">Container image (Trivy)</option>
+                <option value="endpoint">Public endpoint (headers)</option>
             </select>
-
-            <button id="scanButton" type="submit">
-                Run Scan
-            </button>
-
+            <button id="scanButton" class="button" type="submit">▶ Run scan</button>
         </form>
-
-        <div id="scanStatus" class="scan-status"></div>
-
-        <div id="results" class="results">
-
+        <div id="scanStatus" class="scan-status" role="status" aria-live="polite"></div>
+        <div id="results" class="results" aria-live="polite">
+            <div class="results-header">
+                <h3>Latest scan results</h3>
+                <div class="results-header-actions">
+                    <span id="resultsTimestamp" class="results-meta"></span>
+                    <button id="downloadReport" class="button button-secondary download-report" type="button" disabled>↓ Download JSON</button>
+                </div>
+            </div>
             <div class="score-box">
-
                 <div>
-                    <div class="score" id="resultScore">--</div>
-                    <div class="score-label">
-                        Security Score
-                    </div>
+                    <div class="score" id="resultScore">—</div>
+                    <div class="score-label">Security score / 100</div>
                 </div>
-
                 <div>
-                    <strong id="resultTarget"></strong>
-                    <p id="resultSummary"></p>
+                    <p class="score-description" id="resultTarget"></p>
+                    <p class="score-summary" id="resultSummary"></p>
                 </div>
-
             </div>
-
-            <h3>Security Findings</h3>
-
+            <div id="severitySummary" class="severity-summary" aria-label="Finding counts by severity"></div>
+            <div class="findings-toolbar">
+                <h3>Findings</h3>
+                <label class="filter-control" for="findingFilter">
+                    <span>Filter severity</span>
+                    <select id="findingFilter" aria-label="Filter findings by severity">
+                        <option value="ALL">All severities</option>
+                        <option value="CRITICAL">Critical</option>
+                        <option value="HIGH">High</option>
+                        <option value="MEDIUM">Medium</option>
+                        <option value="LOW">Low</option>
+                        <option value="UNKNOWN">Unknown</option>
+                    </select>
+                </label>
+            </div>
             <div id="findings" class="findings"></div>
-
         </div>
-
     </section>
 
-
-    <!-- Pipeline -->
-
-    <section class="section">
-
-        <h2>⚙️ Security Pipeline</h2>
-
-        <p class="section-description">
-            Security controls integrated into the CI/CD lifecycle.
-        </p>
-
+    <section class="panel" aria-labelledby="pipelineHeading">
+        <div class="panel-heading">
+            <div>
+                <h2 id="pipelineHeading">Security pipeline</h2>
+                <p>Stages used by the CodeShield GitHub Actions workflow.</p>
+            </div>
+        </div>
         <div class="pipeline">
-
-            <div class="pipeline-stage">
-                <strong>🔎 Secret Scan</strong>
-                <span class="passed">● Gitleaks Passed</span>
-            </div>
-
-            <div class="pipeline-stage">
-                <strong>🐳 Build</strong>
-                <span class="passed">● Docker Passed</span>
-            </div>
-
-            <div class="pipeline-stage">
-                <strong>🧪 Test</strong>
-                <span class="passed">● Pytest Passed</span>
-            </div>
-
-            <div class="pipeline-stage">
-                <strong>🛡️ Image Scan</strong>
-                <span class="passed">● Trivy Passed</span>
-            </div>
-
-            <div class="pipeline-stage">
-                <strong>☁️ Deploy</strong>
-                <span class="passed">● SSM Passed</span>
-            </div>
-
+            <article class="pipeline-stage"><div class="stage-title">🔎 Secret scan</div><span class="stage-status unknown">Status not connected</span></article>
+            <article class="pipeline-stage"><div class="stage-title">🐳 Docker build</div><span class="stage-status unknown">Status not connected</span></article>
+            <article class="pipeline-stage"><div class="stage-title">🧪 Automated tests</div><span class="stage-status unknown">Status not connected</span></article>
+            <article class="pipeline-stage"><div class="stage-title">🛡️ Image scan</div><span class="stage-status unknown">Status not connected</span></article>
+            <article class="pipeline-stage"><div class="stage-title">☁️ EC2 deployment</div><span class="stage-status unknown">Status not connected</span></article>
         </div>
-
+        <p class="pipeline-note">These are workflow stages, not live status indicators. CodeShield does not claim a stage passed unless a live workflow integration is configured.</p>
     </section>
 
-
-    <!-- Service Information -->
-
-    <section class="section">
-
-        <h2>📊 Service Information</h2>
-
+    <section class="panel" aria-labelledby="serviceHeading">
+        <div class="panel-heading"><div><h2 id="serviceHeading">Service information</h2><p>Runtime details reported by the backend.</p></div></div>
         <div class="info-grid">
-
-            <div class="info-card">
-                <strong>Application</strong>
-                <span>CodeShield</span>
-            </div>
-
-            <div class="info-card">
-                <strong>Environment</strong>
-                <span>{{ environment }}</span>
-            </div>
-
-            <div class="info-card">
-                <strong>Uptime</strong>
-                <span>{{ uptime }} seconds</span>
-            </div>
-
-            <div class="info-card">
-                <strong>Backend</strong>
-                <span>Flask / Python</span>
-            </div>
-
-            <div class="info-card">
-                <strong>Infrastructure</strong>
-                <span>AWS + Terraform</span>
-            </div>
-
-            <div class="info-card">
-                <strong>CI/CD</strong>
-                <span>GitHub Actions</span>
-            </div>
-
+            <div class="info-card"><strong>Application</strong><span>CodeShield</span></div>
+            <div class="info-card"><strong>Environment</strong><span>{{ environment }}</span></div>
+            <div class="info-card"><strong>Uptime</strong><span id="uptime">{{ uptime }} seconds</span></div>
+            <div class="info-card"><strong>Backend</strong><span>Flask / Python</span></div>
+            <div class="info-card"><strong>Infrastructure</strong><span>AWS EC2 · ECR · Terraform</span></div>
+            <div class="info-card"><strong>Delivery</strong><span>GitHub Actions · AWS SSM</span></div>
         </div>
-
     </section>
-
 </main>
-
-
-<footer class="footer">
-    CodeShield • Secure • Automated • Continuous
-</footer>
-
-
+<footer class="footer"><div class="footer-inner"><span>CodeShield · Secure by design</span><span>Scan output should be reviewed before making remediation decisions.</span></div></footer>
 <script>
+(() => {
+    "use strict";
 
     const scanForm = document.getElementById("scanForm");
-
     const targetInput = document.getElementById("target");
-
     const scanTypeInput = document.getElementById("scanType");
-
     const scanButton = document.getElementById("scanButton");
-
     const scanStatus = document.getElementById("scanStatus");
-
     const results = document.getElementById("results");
-
     const findingsContainer = document.getElementById("findings");
-
+    const findingFilter = document.getElementById("findingFilter");
+    const severitySummary = document.getElementById("severitySummary");
+    let latestFindings = [];
     const securityScore = document.getElementById("securityScore");
-
     const openFindings = document.getElementById("openFindings");
-
     const resultScore = document.getElementById("resultScore");
-
     const resultTarget = document.getElementById("resultTarget");
-
     const resultSummary = document.getElementById("resultSummary");
+    const resultsTimestamp = document.getElementById("resultsTimestamp");
+    const downloadReport = document.getElementById("downloadReport");
+    const serviceStatus = document.getElementById("serviceStatus");
+    let latestScanData = null;
+    const refreshHealth = document.getElementById("refreshHealth");
+    const allowedSeverities = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"];
 
+    const targetExamples = {
+        repo: "https://github.com/owner/repository",
+        container: "ghcr.io/owner/image:tag",
+        endpoint: "https://example.com"
+    };
+    function updateTargetHint() {
+        const type = scanTypeInput.value;
+        targetInput.placeholder = targetExamples[type] || targetExamples.repo;
+        targetInput.autocomplete = type === "endpoint" ? "url" : "off";
+    }
+    scanTypeInput.addEventListener("change", updateTargetHint);
+    updateTargetHint();
 
-    scanForm.addEventListener("submit", async function(event) {
+    function showStatus(message, kind = "info") {
+        scanStatus.style.display = "block";
+        scanStatus.dataset.kind = kind;
+        scanStatus.textContent = message;
+    }
 
-        event.preventDefault();
+    function addTextElement(parent, tagName, className, value) {
+        const element = document.createElement(tagName);
+        if (className) element.className = className;
+        element.textContent = String(value ?? "");
+        parent.appendChild(element);
+        return element;
+    }
 
-        const target = targetInput.value.trim();
+    function renderFinding(finding) {
+        const card = document.createElement("article");
+        card.className = "finding";
 
-        const scanType = scanTypeInput.value;
+        const header = document.createElement("div");
+        header.className = "finding-header";
+        addTextElement(header, "div", "finding-title", finding.title || "Untitled finding");
 
+        const severityValue = String(finding.severity || "UNKNOWN").toUpperCase();
+        const severity = addTextElement(header, "span", "severity", severityValue);
+        severity.classList.add(allowedSeverities.includes(severityValue) ? severityValue : "UNKNOWN");
+        card.appendChild(header);
 
-        if (!target) {
+        addTextElement(card, "p", "finding-description", finding.description || "No description available.");
+        addTextElement(card, "div", "finding-source", `Source: ${finding.source || "Unknown"}`);
+
+        const metadata = document.createElement("div");
+        metadata.className = "finding-metadata";
+        const addMetadata = (label, value) => {
+            if (value === null || value === undefined || String(value).trim() === "") return;
+            const item = document.createElement("div");
+            item.className = "finding-meta-item";
+            addTextElement(item, "span", "finding-meta-label", label);
+            addTextElement(item, "span", "finding-meta-value", value);
+            metadata.appendChild(item);
+        };
+
+        addMetadata("Rule / CVE", finding.rule_id);
+        addMetadata("Affected file / target", finding.file);
+        addMetadata("Line", finding.line);
+        addMetadata("Package", finding.package);
+        addMetadata("Installed version", finding.installed_version);
+        addMetadata("Fixed version", finding.fixed_version);
+
+        if (metadata.childElementCount > 0) card.appendChild(metadata);
+        return card;
+    }
+
+    function renderFindings() {
+        findingsContainer.replaceChildren();
+
+        if (latestFindings.length === 0) {
+            const empty = document.createElement("div");
+            empty.className = "empty-state";
+            addTextElement(empty, "strong", "", "No findings reported");
+            addTextElement(
+                empty,
+                "span",
+                "",
+                "The scanners reported no findings. This does not guarantee that the target is completely secure."
+            );
+            findingsContainer.appendChild(empty);
             return;
         }
 
+        const selectedSeverity = findingFilter.value;
+        const filteredFindings = latestFindings.filter(finding => {
+            const severity = String(finding.severity || "UNKNOWN").toUpperCase();
+            return selectedSeverity === "ALL" || severity === selectedSeverity;
+        });
 
-        scanButton.disabled = true;
-
-        scanButton.textContent = "Scanning...";
-
-        scanStatus.style.display = "block";
-
-        scanStatus.textContent = "Running security checks...";
-
-        results.style.display = "none";
-
-
-        try {
-
-            const response = await fetch("/api/scan", {
-
-                method: "POST",
-
-                headers: {
-                    "Content-Type": "application/json"
-                },
-
-                body: JSON.stringify({
-                    target: target,
-                    scan_type: scanType
-                })
-
-            });
-
-
-            const data = await response.json();
-
-
-            if (!response.ok) {
-                throw new Error(data.error || "Scan failed");
-            }
-
-
-            securityScore.textContent = data.score;
-
-            openFindings.textContent = data.findings.length;
-
-            resultScore.textContent = data.score;
-
-            resultTarget.textContent = target;
-
-            resultSummary.textContent =
-                data.findings.length +
-                " security findings detected.";
-
-
-            findingsContainer.innerHTML = "";
-
-
-            data.findings.forEach(function(finding) {
-
-                const card = document.createElement("div");
-
-                card.className = "finding";
-
-
-                card.innerHTML = `
-
-                    <div class="finding-header">
-
-                        <div class="finding-title">
-                            ${finding.title}
-                        </div>
-
-                        <span class="severity ${finding.severity}">
-                            ${finding.severity}
-                        </span>
-
-                    </div>
-
-                    <p>
-                        ${finding.description}
-                    </p>
-
-                    <div class="finding-source">
-                        Source: ${finding.source}
-                    </div>
-
-                `;
-
-
-                findingsContainer.appendChild(card);
-
-            });
-
-
-            results.style.display = "block";
-
-            scanStatus.textContent =
-                "Security scan completed successfully.";
-
-
-        } catch (error) {
-
-            scanStatus.textContent =
-                "Scan failed: " + error.message;
-
-        } finally {
-
-            scanButton.disabled = false;
-
-            scanButton.textContent = "Run Scan";
-
+        if (filteredFindings.length === 0) {
+            const empty = document.createElement("div");
+            empty.className = "empty-state";
+            addTextElement(empty, "strong", "", "No matching findings");
+            addTextElement(
+                empty,
+                "span",
+                "",
+                `There are no ${selectedSeverity} findings in this scan.`
+            );
+            findingsContainer.appendChild(empty);
+            return;
         }
 
+        filteredFindings.forEach(finding => {
+            findingsContainer.appendChild(renderFinding(finding));
+        });
+    }
+
+    function renderSeverityCounts(findings, suppliedStatistics) {
+        severitySummary.replaceChildren();
+        const counts = suppliedStatistics || {};
+        for (const severity of allowedSeverities) {
+            const count = counts[severity.toLowerCase()] ?? findings.filter(
+                finding => String(finding.severity || "UNKNOWN").toUpperCase() === severity
+            ).length;
+            const pill = document.createElement("span");
+            pill.className = `count-pill ${severity.toLowerCase()}`;
+            pill.textContent = `${severity}: ${count}`;
+            severitySummary.appendChild(pill);
+        }
+    }
+
+    async function checkService() {
+        refreshHealth.disabled = true;
+        refreshHealth.textContent = "Checking…";
+        try {
+            const response = await fetch("/health", { headers: { "Accept": "application/json" } });
+            const data = await response.json();
+            if (!response.ok || data.status !== "healthy") throw new Error("Health check did not return healthy status.");
+            serviceStatus.textContent = "HEALTHY";
+            document.getElementById("appVersion").textContent = data.version || "Unknown";
+            document.getElementById("uptime").textContent = data.uptime_seconds != null
+                ? `${data.uptime_seconds} seconds` : document.getElementById("uptime").textContent;
+        } catch (error) {
+            serviceStatus.textContent = "UNAVAILABLE";
+        } finally {
+            refreshHealth.disabled = false;
+            refreshHealth.textContent = "↻ Check service";
+        }
+    }
+
+    function downloadJsonReport() {
+        if (!latestScanData) {
+            showStatus("Run a scan before downloading a report.", "error");
+            return;
+        }
+
+        const report = {
+            report_type: "CodeShield Security Scan Report",
+            report_version: 1,
+            generated_at: new Date().toISOString(),
+            application: {
+                name: "CodeShield",
+                version: document.getElementById("appVersion").textContent
+            },
+            scan: {
+                target: latestScanData.target,
+                scan_type: latestScanData.scan_type,
+                timestamp: latestScanData.timestamp,
+                score: latestScanData.score,
+                finding_count: latestScanData.finding_count ?? latestScanData.findings.length,
+                statistics: latestScanData.statistics || {},
+                repository: latestScanData.repository || null,
+                findings: latestScanData.findings
+            }
+        };
+
+        const blob = new Blob([JSON.stringify(report, null, 2)], {
+            type: "application/json;charset=utf-8"
+        });
+        const objectUrl = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        const targetLabel = String(latestScanData.target || "scan")
+            .replace(/^https?:\/\//i, "")
+            .replace(/[^a-z0-9._-]+/gi, "-")
+            .replace(/^-+|-+$/g, "")
+            .slice(0, 70) || "scan";
+        const dateLabel = new Date().toISOString().replace(/[:.]/g, "-");
+
+        link.href = objectUrl;
+        link.download = `codeshield-${targetLabel}-${dateLabel}.json`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+        showStatus("JSON report generated and download started.", "success");
+    }
+
+    refreshHealth.addEventListener("click", checkService);
+    findingFilter.addEventListener("change", renderFindings);
+    downloadReport.addEventListener("click", downloadJsonReport);
+    checkService();
+
+    scanForm.addEventListener("submit", async event => {
+        event.preventDefault();
+        const target = targetInput.value.trim();
+        const scanType = scanTypeInput.value;
+        if (!target) return;
+
+        scanButton.disabled = true;
+        scanButton.textContent = "Scanning…";
+        showStatus(scanType === "repo" ? "Cloning repository and running Gitleaks + Trivy. This can take a few minutes." : "Running assessment…", "info");
+        results.style.display = "none";
+        downloadReport.disabled = true;
+        latestScanData = null;
+
+        try {
+            const response = await fetch("/api/scan", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "Accept": "application/json" },
+                body: JSON.stringify({ target, scan_type: scanType })
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || `Scan failed with HTTP ${response.status}.`);
+            if (!Array.isArray(data.findings)) throw new Error("The scan API returned an unexpected response.");
+
+            latestScanData = data;
+            downloadReport.disabled = false;
+
+            const score = Number(data.score);
+            securityScore.textContent = Number.isFinite(score) ? String(score) : "—";
+            openFindings.textContent = String(data.finding_count ?? data.findings.length);
+            resultScore.textContent = Number.isFinite(score) ? String(score) : "—";
+            resultTarget.textContent = String(data.target || target);
+            resultSummary.textContent = `${data.findings.length} finding(s) reported for this scan.`;
+            resultsTimestamp.textContent = data.timestamp ? `Completed ${new Date(data.timestamp).toLocaleString()}` : "Scan completed";
+
+            latestFindings = data.findings;
+            findingFilter.value = "ALL";
+            renderFindings();
+            renderSeverityCounts(data.findings, data.statistics);
+            results.style.display = "block";
+            showStatus("Scan completed successfully.", "success");
+        } catch (error) {
+            showStatus(`Scan failed: ${error.message || "Unexpected error."}`, "error");
+        } finally {
+            scanButton.disabled = false;
+            scanButton.textContent = "▶ Run scan";
+        }
     });
-
+})();
 </script>
-
 </body>
 </html>

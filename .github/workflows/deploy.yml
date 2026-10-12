@@ -1,0 +1,113 @@
+name: CodeShield Manual Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_deploy:
+        description: "Type true to build, publish, and deploy CodeShield to AWS"
+        required: true
+        type: choice
+        options: ["false", "true"]
+        default: "false"
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: codeshield-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: ${{ github.ref == 'refs/heads/main' && inputs.confirm_deploy == 'true' }}
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'ap-south-1' }}
+      ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY || 'codeshield' }}
+      EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
+      AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+      CODESHIELD_DOMAIN: ${{ vars.CODESHIELD_DOMAIN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate deployment settings
+        run: |
+          test -n "$AWS_ROLE_ARN" || (echo "Set repository/environment variable AWS_ROLE_ARN"; exit 1)
+          test -n "$EC2_INSTANCE_ID" || (echo "Set repository/environment variable EC2_INSTANCE_ID"; exit 1)
+          test -n "$CODESHIELD_DOMAIN" || (echo "Set production environment variable CODESHIELD_DOMAIN to a domain you control"; exit 1)
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Verify AWS identity
+        run: aws sts get-caller-identity
+      - name: Build and test
+        run: |
+          python -m pip install -r app/requirements-dev.txt
+          python -m py_compile app/app.py
+          pytest -q
+          docker build --pull -t codeshield:${GITHUB_SHA} .
+      - name: Scan image
+        uses: aquasecurity/trivy-action@0.36.0
+        with:
+          image-ref: codeshield:${{ github.sha }}
+          format: table
+          exit-code: '0'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+      - name: Scan Caddy reverse-proxy image
+        uses: aquasecurity/trivy-action@0.36.0
+        with:
+          image-ref: caddy:2.10.2-alpine
+          format: table
+          exit-code: '0'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+      - name: Publish immutable image to ECR
+        id: publish
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          REGISTRY="$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
+          aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$REGISTRY"
+          docker tag "codeshield:${GITHUB_SHA}" "$REGISTRY/$ECR_REPOSITORY:${GITHUB_SHA}"
+          docker push "$REGISTRY/$ECR_REPOSITORY:${GITHUB_SHA}"
+          echo "image=$REGISTRY/$ECR_REPOSITORY:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "registry=$REGISTRY" >> "$GITHUB_OUTPUT"
+      - name: Deploy through SSM
+        env:
+          IMAGE_URI: ${{ steps.publish.outputs.image }}
+          REGISTRY: ${{ steps.publish.outputs.registry }}
+        run: |
+          set -euo pipefail
+          DEPLOY_SCRIPT=$(cat <<EOF
+          set -euo pipefail
+          REGION='$AWS_REGION'
+          IMAGE='$IMAGE_URI'
+          TOKEN=\$(aws ssm get-parameter --name '/codeshield/scan-api-token' --with-decryption --query 'Parameter.Value' --output text --region '$AWS_REGION')
+          aws ecr get-login-password --region '$AWS_REGION' | docker login --username AWS --password-stdin '$REGISTRY'
+          docker pull "\$IMAGE"
+          docker pull caddy:2.10.2-alpine
+          docker network create codeshield-net || true
+          docker rm -f codeshield-caddy codeshield || true
+          install -d -m 0750 -o 10001 -g 10001 /var/lib/codeshield
+          install -d -m 0750 /var/lib/caddy/data /var/lib/caddy/config
+          DOMAIN='$CODESHIELD_DOMAIN'
+          docker run -d --name codeshield --restart unless-stopped --network codeshield-net --log-driver=awslogs --log-opt awslogs-region='$AWS_REGION' --log-opt awslogs-group='/codeshield/app' --log-opt awslogs-create-group=false --log-opt awslogs-stream='codeshield-app' -e ENVIRONMENT=production -e SCAN_API_TOKEN="\$TOKEN" -e CODE_SHIELD_DB_PATH=/app/data/codeshield.db -v /var/lib/codeshield:/app/data "\$IMAGE"
+          printf '%s\n' "\$DOMAIN {" '  reverse_proxy codeshield:5000' '}' > /var/lib/codeshield/Caddyfile
+          docker run -d --name codeshield-caddy --restart unless-stopped --network codeshield-net -p 80:80 -p 443:443 --log-driver=awslogs --log-opt awslogs-region='$AWS_REGION' --log-opt awslogs-group='/codeshield/app' --log-opt awslogs-create-group=false --log-opt awslogs-stream='codeshield-proxy' -v /var/lib/codeshield/Caddyfile:/etc/caddy/Caddyfile:ro -v /var/lib/caddy/data:/data -v /var/lib/caddy/config:/config caddy:2.10.2-alpine
+          for attempt in \$(seq 1 40); do curl -fsS --resolve "\$DOMAIN:443:127.0.0.1" "https://\$DOMAIN/health" && exit 0; sleep 3; done
+          docker logs --tail 100 codeshield
+          docker logs --tail 100 codeshield-caddy
+          exit 1
+          EOF
+          )
+          PARAMETERS=$(jq -n --arg command "$DEPLOY_SCRIPT" '{commands: [$command]}')
+          COMMAND_ID=$(aws ssm send-command --region "$AWS_REGION" --instance-ids "$EC2_INSTANCE_ID" --document-name "AWS-RunShellScript" --parameters "$PARAMETERS" --query 'Command.CommandId' --output text)
+          echo "SSM command: $COMMAND_ID"
+          aws ssm wait command-executed --region "$AWS_REGION" --command-id "$COMMAND_ID" --instance-id "$EC2_INSTANCE_ID"
+          STATUS=$(aws ssm get-command-invocation --region "$AWS_REGION" --command-id "$COMMAND_ID" --instance-id "$EC2_INSTANCE_ID" --query Status --output text)
+          test "$STATUS" = "Success" || (aws ssm get-command-invocation --region "$AWS_REGION" --command-id "$COMMAND_ID" --instance-id "$EC2_INSTANCE_ID"; exit 1)
+          curl --fail --silent --show-error --retry 5 --retry-delay 5 "https://$CODESHIELD_DOMAIN/health"

@@ -1,7 +1,11 @@
-from flask import Flask, jsonify, render_template, request
+﻿from flask import Flask, jsonify, render_template, request
 
 from datetime import datetime, timezone
 from urllib.parse import urlparse
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, build_opener, HTTPRedirectHandler
+import ipaddress
+import socket
 
 import json
 import os
@@ -13,6 +17,7 @@ import time
 
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 1024 * 1024  # Limit scan API request bodies to 1 MiB.
 
 
 # ============================================================
@@ -79,7 +84,7 @@ def validate_github_url(repository_url):
         return None
 
     # Only github.com
-    if parsed.netloc.lower() != "github.com":
+    if parsed.hostname is None or parsed.hostname.lower() != "github.com" or parsed.username or parsed.password or parsed.port is not None:
         return None
 
     path = parsed.path.strip("/")
@@ -405,224 +410,94 @@ def run_gitleaks_scan(repository_directory):
 # ============================================================
 
 def run_trivy_scan(repository_directory):
-    """
-    Run Trivy filesystem vulnerability scanning.
-
-    Only vulnerability scanning is enabled because Gitleaks
-    is responsible for secret detection.
-
-    Returns normalized CodeShield findings.
-    """
-
-    report_directory = tempfile.mkdtemp(
-        prefix="codeshield-trivy-"
-    )
-
-    report_path = os.path.join(
-        report_directory,
-        "trivy-report.json"
-    )
+    """Run Trivy filesystem vulnerability scanning and normalize its findings."""
+    report_directory = tempfile.mkdtemp(prefix="codeshield-trivy-")
+    report_path = os.path.join(report_directory, "trivy-report.json")
 
     command = [
         TRIVY_PATH,
         "fs",
-
-        "--scanners",
-        "vuln",
-
-        "--format",
-        "json",
-
-        "--output",
-        report_path,
-
-        "--no-progress",
-
-        repository_directory
+        "--scanners", "vuln",
+        "--format", "json",
+        "--output", report_path,
+        repository_directory,
     ]
 
     try:
-
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=300,
-            check=False
-        )
-
-    except FileNotFoundError:
-
-        raise RuntimeError(
-            "Trivy was not found.\n\n"
-            "Make sure TRIVY_PATH is configured "
-            "correctly.\n\n"
-            f"Current value: {TRIVY_PATH}"
-        )
-
-    except subprocess.TimeoutExpired:
-
-        raise RuntimeError(
-            "Trivy vulnerability scan timed out."
-        )
-
-    try:
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=300,
+                check=False,
+            )
+        except FileNotFoundError as error:
+            raise RuntimeError(
+                "Trivy was not found. Make sure TRIVY_PATH is configured correctly. "
+                f"Current value: {TRIVY_PATH}"
+            ) from error
+        except subprocess.TimeoutExpired as error:
+            raise RuntimeError("Trivy vulnerability scan timed out.") from error
 
         if result.returncode != 0:
+            error_message = result.stderr.strip() or "Trivy vulnerability scan failed."
+            raise RuntimeError(error_message)
 
-            error_message = (
-                result.stderr.strip()
-            )
-
-            if not error_message:
-                error_message = (
-                    "Trivy vulnerability scan failed."
-                )
-
-            raise RuntimeError(
-                error_message
-            )
-
-        if not os.path.exists(
-            report_path
-        ):
-
-            raise RuntimeError(
-                "Trivy did not generate a JSON report."
-            )
+        if not os.path.isfile(report_path):
+            raise RuntimeError("Trivy did not generate a JSON report.")
 
         try:
+            with open(report_path, "r", encoding="utf-8") as report_file:
+                trivy_results = json.load(report_file)
+        except (json.JSONDecodeError, UnicodeDecodeError) as error:
+            raise RuntimeError("Trivy returned an invalid JSON report.") from error
 
-            with open(
-                report_path,
-                "r",
-                encoding="utf-8"
-            ) as report_file:
-
-                trivy_results = json.load(
-                    report_file
-                )
-
-        except json.JSONDecodeError:
-
-            raise RuntimeError(
-                "Trivy returned an invalid JSON report."
-            )
+        if not isinstance(trivy_results, dict):
+            raise RuntimeError("Trivy returned an unexpected JSON report format.")
 
         findings = []
+        for target in trivy_results.get("Results") or []:
+            if not isinstance(target, dict):
+                continue
 
-        for target in trivy_results.get(
-            "Results",
-            []
-        ):
-
-            target_name = target.get(
-                "Target",
-                "unknown target"
-            )
-
-            vulnerabilities = target.get(
-                "Vulnerabilities",
-                []
-            ) or []
+            target_name = target.get("Target", "unknown target")
+            vulnerabilities = target.get("Vulnerabilities") or []
 
             for vulnerability in vulnerabilities:
+                if not isinstance(vulnerability, dict):
+                    continue
 
-                severity = str(
-                    vulnerability.get(
-                        "Severity",
-                        "UNKNOWN"
-                    )
-                ).upper()
+                severity = str(vulnerability.get("Severity") or "UNKNOWN").upper()
+                if severity not in {"CRITICAL", "HIGH", "MEDIUM", "LOW"}:
+                    severity = "UNKNOWN"
 
-                # CodeShield currently supports
-                # CRITICAL / HIGH / MEDIUM / LOW.
-                if severity not in {
-                    "CRITICAL",
-                    "HIGH",
-                    "MEDIUM",
-                    "LOW"
-                }:
-                    severity = "LOW"
-
-                vulnerability_id = (
-                    vulnerability.get(
-                        "VulnerabilityID",
-                        "Unknown vulnerability"
-                    )
-                )
-
-                package_name = (
-                    vulnerability.get(
-                        "PkgName",
-                        "Unknown package"
-                    )
-                )
-
-                installed_version = (
-                    vulnerability.get(
-                        "InstalledVersion",
-                        "Unknown"
-                    )
-                )
-
-                fixed_version = (
-                    vulnerability.get(
-                        "FixedVersion",
-                        ""
-                    )
-                )
-
-                title = vulnerability.get(
-                    "Title",
-                    vulnerability_id
-                )
-
-                description = vulnerability.get(
-                    "Description",
-                    ""
+                vulnerability_id = vulnerability.get("VulnerabilityID", "Unknown vulnerability")
+                package_name = vulnerability.get("PkgName", "Unknown package")
+                installed_version = vulnerability.get("InstalledVersion", "Unknown")
+                fixed_version = vulnerability.get("FixedVersion") or ""
+                title = vulnerability.get("Title") or vulnerability_id
+                description = vulnerability.get("Description") or (
+                    f"{package_name} {installed_version} has vulnerability {vulnerability_id}."
                 )
 
                 findings.append({
-
                     "severity": severity,
-
                     "title": title,
-
-                    "description": (
-                        description
-                        if description
-                        else (
-                            f"{package_name} "
-                            f"{installed_version} "
-                            f"has vulnerability "
-                            f"{vulnerability_id}."
-                        )
-                    ),
-
+                    "description": description,
                     "source": "Trivy",
-
                     "rule_id": vulnerability_id,
-
                     "file": target_name,
-
                     "line": None,
-
                     "package": package_name,
-
                     "installed_version": installed_version,
-
-                    "fixed_version": fixed_version
+                    "fixed_version": fixed_version,
                 })
 
         return findings
-
     finally:
-
-        shutil.rmtree(
-            report_directory,
-            ignore_errors=True
-        )
+        # Includes scanner-not-found and timeout failures so temporary reports do not leak.
+        shutil.rmtree(report_directory, ignore_errors=True)
 
 
 # ============================================================
@@ -685,6 +560,7 @@ def calculate_finding_statistics(findings):
         "high": 0,
         "medium": 0,
         "low": 0,
+        "unknown": 0,
         "gitleaks": 0,
         "trivy": 0
     }
@@ -694,7 +570,7 @@ def calculate_finding_statistics(findings):
         severity = str(
             finding.get(
                 "severity",
-                "LOW"
+                "UNKNOWN"
             )
         ).lower()
 
@@ -715,6 +591,222 @@ def calculate_finding_statistics(findings):
             statistics["trivy"] += 1
 
     return statistics
+
+
+
+# ============================================================
+# Endpoint and Container Scanning
+# ============================================================
+
+class _NoRedirectHandler(HTTPRedirectHandler):
+    """Do not follow redirects; each redirect target must be reviewed separately."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def validate_public_http_url(value):
+    """Validate an HTTP(S) target and reject local/private network destinations."""
+    if not isinstance(value, str) or len(value) > 2048:
+        return None
+    try:
+        parsed = urlparse(value.strip())
+        if parsed.scheme.lower() not in {"http", "https"}:
+            return None
+        if not parsed.hostname or parsed.username or parsed.password:
+            return None
+        if parsed.port not in (None, 80, 443):
+            # Restrict scanning to conventional web ports.
+            return None
+        if parsed.scheme.lower() == "https" and parsed.port not in (None, 443):
+            return None
+        if parsed.scheme.lower() == "http" and parsed.port not in (None, 80):
+            return None
+        host = parsed.hostname.rstrip(".").lower()
+        if host == "localhost" or host.endswith(".localhost") or host.endswith(".local"):
+            return None
+        try:
+            addresses = [ipaddress.ip_address(host)]
+        except ValueError:
+            addresses = [
+                ipaddress.ip_address(item[4][0])
+                for item in socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80), type=socket.SOCK_STREAM)
+            ]
+        if not addresses or any(
+            not addr.is_global or addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_multicast or addr.is_reserved
+            for addr in addresses
+        ):
+            return None
+        return parsed.geturl()
+    except (ValueError, OSError, socket.gaierror):
+        return None
+
+
+def run_endpoint_scan(target):
+    """Check a public web endpoint's availability and common security headers."""
+    safe_url = validate_public_http_url(target)
+    if safe_url is None:
+        raise ValueError("Endpoint must be a public HTTP(S) URL on a standard web port. Private, local, and non-public destinations are blocked.")
+
+    request = Request(
+        safe_url,
+        headers={"User-Agent": "CodeShield-Scanner/1.0", "Accept": "*/*"},
+        method="GET",
+    )
+    opener = build_opener(_NoRedirectHandler)
+    try:
+        with opener.open(request, timeout=8) as response:
+            status = response.status
+            headers = response.headers
+            # Read only a small prefix so endpoints cannot force large downloads.
+            response.read(4096)
+    except HTTPError as error:
+        # HTTP errors still carry useful response headers and indicate a reachable endpoint.
+        status = error.code
+        headers = error.headers
+    except (URLError, TimeoutError, OSError) as error:
+        raise RuntimeError(f"Endpoint request failed: {type(error).__name__}. Check the URL and try again.") from error
+
+    findings = []
+    checks = [
+        ("Strict-Transport-Security", "HIGH", "HTTP Strict Transport Security is missing", "Enable HSTS on HTTPS sites to help prevent protocol downgrade attacks."),
+        ("Content-Security-Policy", "MEDIUM", "Content Security Policy is missing", "Add a suitable Content-Security-Policy to reduce the impact of some injection attacks."),
+        ("X-Content-Type-Options", "LOW", "X-Content-Type-Options is missing", "Set X-Content-Type-Options: nosniff."),
+        ("Referrer-Policy", "LOW", "Referrer Policy is missing", "Set a Referrer-Policy appropriate for the application."),
+        ("Permissions-Policy", "LOW", "Permissions Policy is missing", "Restrict browser features that the application does not need."),
+    ]
+    for header, severity, title, description in checks:
+        if not headers.get(header):
+            # HSTS is meaningful only over HTTPS.
+            if header == "Strict-Transport-Security" and not safe_url.lower().startswith("https://"):
+                continue
+            findings.append({
+                "severity": severity,
+                "title": title,
+                "description": description,
+                "source": "HTTP",
+                "rule_id": f"missing-{header.lower()}",
+                "file": urlparse(safe_url).netloc,
+            })
+    if status >= 500:
+        findings.append({
+            "severity": "MEDIUM",
+            "title": "Endpoint returned a server error",
+            "description": f"The endpoint responded with HTTP {status}. Review server logs and error handling.",
+            "source": "HTTP",
+            "rule_id": "http-server-error",
+            "file": urlparse(safe_url).netloc,
+        })
+    return findings
+
+
+def validate_container_reference(value):
+    """Conservative validation for Docker/OCI image references passed to Trivy."""
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    if not value or len(value) > 512 or value.startswith("-") or any(ch.isspace() for ch in value):
+        return None
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/@-]*", value):
+        return None
+    if value.count("@") > 1 or value.endswith(":") or "//" in value:
+        return None
+    return value
+
+
+def run_trivy_image_scan(image_reference):
+    """Run Trivy against a container image and normalize vulnerability results."""
+    image_reference = validate_container_reference(image_reference)
+    if image_reference is None:
+        raise ValueError("Enter a valid container image reference, for example nginx:1.27 or ghcr.io/owner/image:tag.")
+
+    temporary_directory = tempfile.mkdtemp(prefix="codeshield-image-")
+    report_path = os.path.join(temporary_directory, "trivy-image.json")
+    command = [
+        TRIVY_PATH, "image", "--scanners", "vuln",
+        "--format", "json", "--output", report_path,
+        "--timeout", "5m", image_reference,
+    ]
+    try:
+        result = subprocess.run(
+            command, capture_output=True, text=True, timeout=360, check=False,
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "Trivy could not scan this image.").strip()
+            raise RuntimeError(f"Container scan failed: {detail[-1200:]}")
+        try:
+            with open(report_path, "r", encoding="utf-8") as report_file:
+                report = json.load(report_file)
+        except (OSError, json.JSONDecodeError) as error:
+            raise RuntimeError("Trivy did not produce a valid image scan report.") from error
+
+        findings = []
+        for item in report.get("Results") or []:
+            target = item.get("Target", "container image")
+            for vuln in item.get("Vulnerabilities") or []:
+                findings.append({
+                    "severity": str(vuln.get("Severity") or "UNKNOWN").upper(),
+                    "title": vuln.get("Title") or vuln.get("VulnerabilityID") or "Container vulnerability",
+                    "description": vuln.get("Description") or vuln.get("Title") or "No description provided by Trivy.",
+                    "source": "Trivy",
+                    "rule_id": vuln.get("VulnerabilityID", ""),
+                    "file": target,
+                    "package": vuln.get("PkgName", ""),
+                    "installed_version": vuln.get("InstalledVersion", ""),
+                    "fixed_version": vuln.get("FixedVersion", ""),
+                    "references": (vuln.get("References") or [])[:5],
+                })
+        return findings
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError("Container scan timed out after 6 minutes.") from error
+    finally:
+        shutil.rmtree(temporary_directory, ignore_errors=True)
+
+
+
+def run_trivy_config_scan(repository_directory):
+    """Scan repository infrastructure/configuration files with Trivy."""
+    report_directory = tempfile.mkdtemp(prefix="codeshield-config-")
+    report_path = os.path.join(report_directory, "trivy-config.json")
+    command = [
+        TRIVY_PATH, "config", "--format", "json",
+        "--output", report_path, repository_directory,
+    ]
+    try:
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=300, check=False)
+        except FileNotFoundError as error:
+            raise RuntimeError("Trivy was not found. Configure TRIVY_PATH.") from error
+        except subprocess.TimeoutExpired as error:
+            raise RuntimeError("Trivy configuration scan timed out.") from error
+        if result.returncode != 0:
+            raise RuntimeError((result.stderr or "Trivy configuration scan failed.")[-1200:])
+        try:
+            with open(report_path, "r", encoding="utf-8") as handle:
+                report = json.load(handle)
+        except (OSError, json.JSONDecodeError) as error:
+            raise RuntimeError("Trivy did not produce a valid configuration report.") from error
+        findings = []
+        for item in report.get("Results") or []:
+            target = item.get("Target", "unknown target")
+            for misconfig in item.get("Misconfigurations") or []:
+                severity = str(misconfig.get("Severity") or "UNKNOWN").upper()
+                if severity not in {"CRITICAL", "HIGH", "MEDIUM", "LOW"}:
+                    severity = "UNKNOWN"
+                cause = misconfig.get("CauseMetadata") or {}
+                findings.append({
+                    "severity": severity,
+                    "title": misconfig.get("Title") or misconfig.get("ID") or "Infrastructure misconfiguration",
+                    "description": misconfig.get("Description") or misconfig.get("Message") or "Review this configuration finding.",
+                    "source": "Trivy",
+                    "rule_id": misconfig.get("ID", ""),
+                    "file": target,
+                    "line": (cause.get("StartLine") or None),
+                    "references": (misconfig.get("References") or [])[:5],
+                })
+        return findings
+    finally:
+        shutil.rmtree(report_directory, ignore_errors=True)
 
 
 # ============================================================
@@ -751,98 +843,23 @@ def run_security_scan(
         )
 
         # Real Trivy vulnerability scan
-        trivy_findings = run_trivy_scan(
-            repository_directory
-        )
+        trivy_findings = run_trivy_scan(repository_directory)
+        config_findings = run_trivy_config_scan(repository_directory)
 
-        # Combine both scanners
-        findings = (
-            gitleaks_findings
-            + trivy_findings
-        )
+        # Combine secret, dependency, and infrastructure/configuration findings.
+        findings = gitleaks_findings + trivy_findings + config_findings
 
     # --------------------------------------------------------
-    # Endpoint Scan
+    # Endpoint Scan (real HTTP security-header checks)
     # --------------------------------------------------------
-
     elif scan_type == "endpoint":
-
-        findings = [
-
-            {
-                "severity": "MEDIUM",
-
-                "title": (
-                    "Security headers should be reviewed"
-                ),
-
-                "description": (
-                    "Review HTTP response headers such as "
-                    "Content-Security-Policy, HSTS and "
-                    "X-Content-Type-Options."
-                ),
-
-                "source": "HTTP"
-            },
-
-            {
-                "severity": "LOW",
-
-                "title": (
-                    "Health endpoint is publicly discoverable"
-                ),
-
-                "description": (
-                    "Consider whether detailed health "
-                    "information should be publicly "
-                    "accessible."
-                ),
-
-                "source": "HTTP"
-            }
-
-        ]
+        findings = run_endpoint_scan(target)
 
     # --------------------------------------------------------
-    # Container Scan
+    # Container Scan (real Trivy image scan)
     # --------------------------------------------------------
-
     elif scan_type == "container":
-
-        findings = [
-
-            {
-                "severity": "HIGH",
-
-                "title": (
-                    "Critical CVEs should block releases"
-                ),
-
-                "description": (
-                    "Configure the container security stage "
-                    "to fail when critical vulnerabilities "
-                    "are detected."
-                ),
-
-                "source": "Trivy"
-            },
-
-            {
-                "severity": "MEDIUM",
-
-                "title": (
-                    "Generate a software bill of materials"
-                ),
-
-                "description": (
-                    "Generate an SBOM for container images "
-                    "to improve dependency visibility."
-                ),
-
-                "source": "Container"
-            }
-
-        ]
+        findings = run_trivy_image_scan(target)
 
     score = calculate_security_score(
         findings
@@ -942,9 +959,9 @@ def info():
 )
 def scan():
 
-    data = request.get_json(
-        silent=True
-    ) or {}
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "Request body must be a JSON object."}), 400
 
     target = str(
         data.get(
@@ -970,6 +987,11 @@ def scan():
 
             "error": "Target is required."
 
+        }), 400
+
+    if len(target) > 2048:
+        return jsonify({
+            "error": "Target must be 2048 characters or fewer."
         }), 400
 
     # --------------------------------------------------------
@@ -1126,3 +1148,4 @@ if __name__ == "__main__":
         port=5000
 
     )
+

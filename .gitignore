@@ -23,3 +23,15 @@ crash.*.log
 .idea/
 .vscode/
 *.swp
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
