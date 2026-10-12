@@ -1,167 +1,311 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <title>CodeShield | DevSecOps Security Platform</title>
+    <title>CodeShield | Security Control Center</title>
 
     <style>
+        * {
+            box-sizing: border-box;
+        }
+
         body {
-            font-family: Arial, sans-serif;
-            background: #f4f6f8;
             margin: 0;
-            padding: 0;
-            color: #1f2937;
+            font-family: Arial, sans-serif;
+            background: #0b1120;
+            color: #e5e7eb;
         }
 
         .header {
             background: #111827;
-            color: white;
-            padding: 30px;
-            text-align: center;
+            border-bottom: 1px solid #1f2937;
+            padding: 24px 40px;
         }
 
-        .header h1 {
+        .header-inner {
+            max-width: 1200px;
+            margin: auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .brand h1 {
             margin: 0;
-            font-size: 36px;
+            font-size: 28px;
         }
 
-        .header p {
-            margin: 8px 0 0;
-            color: #d1d5db;
+        .brand p {
+            margin: 6px 0 0;
+            color: #9ca3af;
+        }
+
+        .status {
+            padding: 8px 14px;
+            border-radius: 20px;
+            background: #064e3b;
+            color: #6ee7b7;
+            font-size: 13px;
+            font-weight: bold;
         }
 
         .container {
-            max-width: 1000px;
+            max-width: 1200px;
             margin: 30px auto;
             padding: 0 20px;
         }
 
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+
+        .metric {
+            background: #111827;
+            border: 1px solid #1f2937;
+            border-radius: 12px;
+            padding: 20px;
+        }
+
+        .metric-label {
+            color: #9ca3af;
+            font-size: 13px;
+            margin-bottom: 10px;
+        }
+
+        .metric-value {
+            font-size: 28px;
+            font-weight: bold;
+        }
+
         .section {
-            background: white;
-            border-radius: 10px;
-            padding: 25px;
-            margin-bottom: 25px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+            background: #111827;
+            border: 1px solid #1f2937;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 20px;
         }
 
         .section h2 {
             margin-top: 0;
-            color: #111827;
-        }
-
-        .status {
-            display: inline-block;
-            background: #dcfce7;
-            color: #166534;
-            padding: 8px 15px;
-            border-radius: 20px;
-            font-weight: bold;
-        }
-
-        .info-grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 15px;
-            margin-top: 20px;
-        }
-
-        .info-card {
-            background: #f9fafb;
-            border: 1px solid #e5e7eb;
-            padding: 18px;
-            border-radius: 8px;
-        }
-
-        .info-card strong {
-            display: block;
             margin-bottom: 8px;
-            color: #6b7280;
+        }
+
+        .section-description {
+            color: #9ca3af;
+            margin-bottom: 20px;
+        }
+
+        .scan-form {
+            display: grid;
+            grid-template-columns: 1fr 200px 150px;
+            gap: 12px;
+        }
+
+        input,
+        select {
+            width: 100%;
+            padding: 13px;
+            background: #0b1120;
+            border: 1px solid #374151;
+            border-radius: 8px;
+            color: white;
             font-size: 14px;
         }
 
-        .pipeline {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            align-items: center;
+        button {
+            border: none;
+            border-radius: 8px;
+            background: #4f46e5;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        button:hover {
+            background: #4338ca;
+        }
+
+        button:disabled {
+            background: #374151;
+            cursor: not-allowed;
+        }
+
+        .scan-status {
+            display: none;
+            margin-top: 15px;
+            padding: 12px;
+            border-radius: 8px;
+            background: #1f2937;
+            color: #d1d5db;
+        }
+
+        .results {
+            display: none;
             margin-top: 20px;
         }
 
-        .stage {
-            background: #eef2ff;
-            border: 1px solid #c7d2fe;
-            padding: 12px 16px;
-            border-radius: 8px;
+        .score-box {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            padding: 20px;
+            background: #0b1120;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+
+        .score {
+            font-size: 48px;
             font-weight: bold;
         }
 
-        .arrow {
-            font-size: 20px;
-            color: #6b7280;
+        .score-label {
+            color: #9ca3af;
         }
 
-        .security-grid {
+        .findings {
+            display: grid;
+            gap: 12px;
+        }
+
+        .finding {
+            border: 1px solid #374151;
+            border-radius: 10px;
+            padding: 18px;
+            background: #0b1120;
+        }
+
+        .finding-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .finding-title {
+            font-weight: bold;
+            font-size: 16px;
+        }
+
+        .severity {
+            padding: 5px 9px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: bold;
+        }
+
+        .HIGH {
+            background: #7f1d1d;
+            color: #fecaca;
+        }
+
+        .MEDIUM {
+            background: #78350f;
+            color: #fde68a;
+        }
+
+        .LOW {
+            background: #1e3a8a;
+            color: #bfdbfe;
+        }
+
+        .finding p {
+            margin: 8px 0;
+            color: #9ca3af;
+            line-height: 1.5;
+        }
+
+        .finding-source {
+            color: #818cf8;
+            font-size: 12px;
+        }
+
+        .pipeline {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 12px;
+        }
+
+        .pipeline-stage {
+            background: #0b1120;
+            border: 1px solid #1f2937;
+            border-radius: 10px;
+            padding: 18px;
+        }
+
+        .pipeline-stage strong {
+            display: block;
+            margin-bottom: 8px;
+        }
+
+        .passed {
+            color: #6ee7b7;
+            font-size: 13px;
+        }
+
+        .info-grid {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
             gap: 15px;
         }
 
-        .security-card {
-            border: 1px solid #e5e7eb;
-            padding: 20px;
-            border-radius: 8px;
-            background: #fafafa;
-        }
-
-        .security-card h3 {
-            margin-top: 0;
-        }
-
-        .security-card p {
-            color: #4b5563;
-            line-height: 1.5;
-        }
-
-        .objective {
-            background: #f9fafb;
-            border-left: 5px solid #4f46e5;
+        .info-card {
+            background: #0b1120;
+            border: 1px solid #1f2937;
+            border-radius: 10px;
             padding: 18px;
-            line-height: 1.6;
+        }
+
+        .info-card strong {
+            display: block;
+            margin-bottom: 8px;
+        }
+
+        .info-card span {
+            color: #9ca3af;
         }
 
         .footer {
             text-align: center;
-            padding: 25px;
+            padding: 30px;
             color: #6b7280;
         }
 
-        @media (max-width: 800px) {
-            .info-grid,
-            .security-grid {
+        @media (max-width: 900px) {
+            .metrics {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .scan-form {
+                grid-template-columns: 1fr;
+            }
+
+            .pipeline {
+                grid-template-columns: 1fr 1fr;
+            }
+
+            .info-grid {
                 grid-template-columns: 1fr 1fr;
             }
         }
 
-        @media (max-width: 500px) {
-            .info-grid,
-            .security-grid {
-                grid-template-columns: 1fr;
-            }
-
-            .arrow {
-                display: none;
-            }
-
-            .pipeline {
+        @media (max-width: 600px) {
+            .header-inner {
                 flex-direction: column;
-                align-items: stretch;
+                gap: 15px;
+                align-items: flex-start;
             }
 
-            .stage {
-                text-align: center;
+            .metrics,
+            .info-grid,
+            .pipeline {
+                grid-template-columns: 1fr;
             }
         }
     </style>
@@ -169,215 +313,366 @@
 
 <body>
 
-    <header class="header">
-        <h1>🛡️ CodeShield</h1>
-        <p>Automated DevSecOps Security Platform</p>
-    </header>
+<header class="header">
+    <div class="header-inner">
 
-    <main class="container">
+        <div class="brand">
+            <h1>🛡️ CodeShield</h1>
+            <p>DevSecOps Security Control Center</p>
+        </div>
 
-        <!-- Application Status -->
-        <section class="section">
+        <div class="status">
+            ● SERVICE OPERATIONAL
+        </div>
 
-            <h2>Application Status</h2>
+    </div>
+</header>
 
-            <span class="status">🟢 HEALTHY</span>
+<main class="container">
 
-            <div class="info-grid">
+    <!-- Metrics -->
 
-                <div class="info-card">
-                    <strong>VERSION</strong>
-                    {{ version }}
+    <section class="metrics">
+
+        <div class="metric">
+            <div class="metric-label">SECURITY SCORE</div>
+            <div class="metric-value" id="securityScore">84</div>
+        </div>
+
+        <div class="metric">
+            <div class="metric-label">OPEN FINDINGS</div>
+            <div class="metric-value" id="openFindings">4</div>
+        </div>
+
+        <div class="metric">
+            <div class="metric-label">PIPELINE</div>
+            <div class="metric-value">PASSING</div>
+        </div>
+
+        <div class="metric">
+            <div class="metric-label">VERSION</div>
+            <div class="metric-value">{{ version }}</div>
+        </div>
+
+    </section>
+
+
+    <!-- Security Scanner -->
+
+    <section class="section">
+
+        <h2>🔍 Run Security Check</h2>
+
+        <p class="section-description">
+            Run a security assessment against a repository, container image,
+            or application endpoint.
+        </p>
+
+        <form id="scanForm" class="scan-form">
+
+            <input
+                id="target"
+                type="text"
+                placeholder="Enter repository, image, or endpoint"
+                required
+            >
+
+            <select id="scanType">
+
+                <option value="repo">
+                    Repository
+                </option>
+
+                <option value="container">
+                    Container Image
+                </option>
+
+                <option value="endpoint">
+                    Endpoint
+                </option>
+
+            </select>
+
+            <button id="scanButton" type="submit">
+                Run Scan
+            </button>
+
+        </form>
+
+        <div id="scanStatus" class="scan-status"></div>
+
+        <div id="results" class="results">
+
+            <div class="score-box">
+
+                <div>
+                    <div class="score" id="resultScore">--</div>
+                    <div class="score-label">
+                        Security Score
+                    </div>
                 </div>
 
-                <div class="info-card">
-                    <strong>ENVIRONMENT</strong>
-                    {{ environment }}
-                </div>
-
-                <div class="info-card">
-                    <strong>UPTIME</strong>
-                    {{ uptime }} seconds
-                </div>
-
-                <div class="info-card">
-                    <strong>SECURITY</strong>
-                    ENABLED
+                <div>
+                    <strong id="resultTarget"></strong>
+                    <p id="resultSummary"></p>
                 </div>
 
             </div>
 
-        </section>
+            <h3>Security Findings</h3>
+
+            <div id="findings" class="findings"></div>
+
+        </div>
+
+    </section>
 
 
-        <!-- DevSecOps Pipeline -->
-        <section class="section">
+    <!-- Pipeline -->
 
-            <h2>🔄 DevSecOps Pipeline</h2>
+    <section class="section">
 
-            <p>
-                Security is integrated throughout the software delivery lifecycle.
-            </p>
+        <h2>⚙️ Security Pipeline</h2>
 
-            <div class="pipeline">
+        <p class="section-description">
+            Security controls integrated into the CI/CD lifecycle.
+        </p>
 
-                <div class="stage">📋 Plan</div>
+        <div class="pipeline">
 
-                <span class="arrow">→</span>
-
-                <div class="stage">💻 Code</div>
-
-                <span class="arrow">→</span>
-
-                <div class="stage">🔨 Build</div>
-
-                <span class="arrow">→</span>
-
-                <div class="stage">🧪 Test</div>
-
-                <span class="arrow">→</span>
-
-                <div class="stage">🔐 Scan</div>
-
-                <span class="arrow">→</span>
-
-                <div class="stage">📦 Release</div>
-
-                <span class="arrow">→</span>
-
-                <div class="stage">☁️ Deploy</div>
-
-                <span class="arrow">→</span>
-
-                <div class="stage">📊 Monitor</div>
-
+            <div class="pipeline-stage">
+                <strong>🔎 Secret Scan</strong>
+                <span class="passed">● Gitleaks Passed</span>
             </div>
 
-        </section>
+            <div class="pipeline-stage">
+                <strong>🐳 Build</strong>
+                <span class="passed">● Docker Passed</span>
+            </div>
+
+            <div class="pipeline-stage">
+                <strong>🧪 Test</strong>
+                <span class="passed">● Pytest Passed</span>
+            </div>
+
+            <div class="pipeline-stage">
+                <strong>🛡️ Image Scan</strong>
+                <span class="passed">● Trivy Passed</span>
+            </div>
+
+            <div class="pipeline-stage">
+                <strong>☁️ Deploy</strong>
+                <span class="passed">● SSM Passed</span>
+            </div>
+
+        </div>
+
+    </section>
 
 
-        <!-- Security Controls -->
-        <section class="section">
+    <!-- Service Information -->
 
-            <h2>🔐 Security Controls</h2>
+    <section class="section">
 
-            <div class="security-grid">
+        <h2>📊 Service Information</h2>
 
-                <div class="security-card">
-                    <h3>🔎 Gitleaks</h3>
+        <div class="info-grid">
+
+            <div class="info-card">
+                <strong>Application</strong>
+                <span>CodeShield</span>
+            </div>
+
+            <div class="info-card">
+                <strong>Environment</strong>
+                <span>{{ environment }}</span>
+            </div>
+
+            <div class="info-card">
+                <strong>Uptime</strong>
+                <span>{{ uptime }} seconds</span>
+            </div>
+
+            <div class="info-card">
+                <strong>Backend</strong>
+                <span>Flask / Python</span>
+            </div>
+
+            <div class="info-card">
+                <strong>Infrastructure</strong>
+                <span>AWS + Terraform</span>
+            </div>
+
+            <div class="info-card">
+                <strong>CI/CD</strong>
+                <span>GitHub Actions</span>
+            </div>
+
+        </div>
+
+    </section>
+
+</main>
+
+
+<footer class="footer">
+    CodeShield • Secure • Automated • Continuous
+</footer>
+
+
+<script>
+
+    const scanForm = document.getElementById("scanForm");
+
+    const targetInput = document.getElementById("target");
+
+    const scanTypeInput = document.getElementById("scanType");
+
+    const scanButton = document.getElementById("scanButton");
+
+    const scanStatus = document.getElementById("scanStatus");
+
+    const results = document.getElementById("results");
+
+    const findingsContainer = document.getElementById("findings");
+
+    const securityScore = document.getElementById("securityScore");
+
+    const openFindings = document.getElementById("openFindings");
+
+    const resultScore = document.getElementById("resultScore");
+
+    const resultTarget = document.getElementById("resultTarget");
+
+    const resultSummary = document.getElementById("resultSummary");
+
+
+    scanForm.addEventListener("submit", async function(event) {
+
+        event.preventDefault();
+
+        const target = targetInput.value.trim();
+
+        const scanType = scanTypeInput.value;
+
+
+        if (!target) {
+            return;
+        }
+
+
+        scanButton.disabled = true;
+
+        scanButton.textContent = "Scanning...";
+
+        scanStatus.style.display = "block";
+
+        scanStatus.textContent = "Running security checks...";
+
+        results.style.display = "none";
+
+
+        try {
+
+            const response = await fetch("/api/scan", {
+
+                method: "POST",
+
+                headers: {
+                    "Content-Type": "application/json"
+                },
+
+                body: JSON.stringify({
+                    target: target,
+                    scan_type: scanType
+                })
+
+            });
+
+
+            const data = await response.json();
+
+
+            if (!response.ok) {
+                throw new Error(data.error || "Scan failed");
+            }
+
+
+            securityScore.textContent = data.score;
+
+            openFindings.textContent = data.findings.length;
+
+            resultScore.textContent = data.score;
+
+            resultTarget.textContent = target;
+
+            resultSummary.textContent =
+                data.findings.length +
+                " security findings detected.";
+
+
+            findingsContainer.innerHTML = "";
+
+
+            data.findings.forEach(function(finding) {
+
+                const card = document.createElement("div");
+
+                card.className = "finding";
+
+
+                card.innerHTML = `
+
+                    <div class="finding-header">
+
+                        <div class="finding-title">
+                            ${finding.title}
+                        </div>
+
+                        <span class="severity ${finding.severity}">
+                            ${finding.severity}
+                        </span>
+
+                    </div>
+
                     <p>
-                        Automated secret detection scans the source repository
-                        for accidentally committed credentials and sensitive data.
+                        ${finding.description}
                     </p>
-                </div>
 
-                <div class="security-card">
-                    <h3>🐳 Trivy</h3>
-                    <p>
-                        Container security scanning checks Docker images for
-                        known HIGH and CRITICAL vulnerabilities.
-                    </p>
-                </div>
+                    <div class="finding-source">
+                        Source: ${finding.source}
+                    </div>
 
-                <div class="security-card">
-                    <h3>🧪 Pytest</h3>
-                    <p>
-                        Automated application tests verify functionality before
-                        the application moves through the delivery pipeline.
-                    </p>
-                </div>
-
-            </div>
-
-        </section>
+                `;
 
 
-        <!-- Infrastructure -->
-        <section class="section">
+                findingsContainer.appendChild(card);
 
-            <h2>☁️ Cloud Infrastructure</h2>
-
-            <div class="security-grid">
-
-                <div class="security-card">
-                    <h3>Terraform</h3>
-                    <p>Infrastructure as Code for reproducible AWS infrastructure.</p>
-                </div>
-
-                <div class="security-card">
-                    <h3>Docker</h3>
-                    <p>Containerized application environment for consistent deployment.</p>
-                </div>
-
-                <div class="security-card">
-                    <h3>AWS</h3>
-                    <p>Cloud platform hosting the application infrastructure.</p>
-                </div>
-
-                <div class="security-card">
-                    <h3>GitHub Actions</h3>
-                    <p>Automated CI/CD pipeline for building, testing and security scanning.</p>
-                </div>
-
-                <div class="security-card">
-                    <h3>Amazon ECR</h3>
-                    <p>Container image registry for storing deployable Docker images.</p>
-                </div>
-
-                <div class="security-card">
-                    <h3>CloudWatch</h3>
-                    <p>Continuous monitoring and operational visibility for AWS resources.</p>
-                </div>
-
-            </div>
-
-        </section>
+            });
 
 
-        <!-- Project Objective -->
-        <section class="section">
+            results.style.display = "block";
 
-            <h2>🎯 Project Objective</h2>
-
-            <div class="objective">
-                CodeShield demonstrates how automated security scanning can be
-                integrated into a containerized CI/CD pipeline to detect security
-                issues early, reduce manual security checks, and improve the
-                security posture of applications before deployment.
-            </div>
-
-        </section>
+            scanStatus.textContent =
+                "Security scan completed successfully.";
 
 
-        <!-- Current Security State -->
-        <section class="section">
+        } catch (error) {
 
-            <h2>🛡️ Security-First Development</h2>
+            scanStatus.textContent =
+                "Scan failed: " + error.message;
 
-            <p>
-                <strong>Early Detection</strong>
-                → <strong>Automated Scanning</strong>
-                → <strong>Faster Remediation</strong>
-                → <strong>Safer Deployment</strong>
-            </p>
+        } finally {
 
-            <p>
-                CodeShield follows a security-first approach by integrating
-                automated testing and security checks directly into the CI/CD
-                workflow.
-            </p>
+            scanButton.disabled = false;
 
-        </section>
+            scanButton.textContent = "Run Scan";
 
-    </main>
+        }
 
+    });
 
-    <footer class="footer">
-        🟢 CodeShield is running successfully.
-        <br>
-        Secure • Automated • Continuous
-    </footer>
+</script>
 
 </body>
-
 </html>
