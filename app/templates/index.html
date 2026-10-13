@@ -57,7 +57,7 @@
         .panel-heading { display: flex; justify-content: space-between; align-items: start; gap: 18px; margin-bottom: 18px; }
         .panel-heading h2 { margin-bottom: 5px; font-size: 18px; letter-spacing: -.02em; }
         .panel-heading p { margin-bottom: 0; color: var(--muted); font-size: 13px; }
-        .scan-form { display: grid; grid-template-columns: minmax(0, 1fr) 190px 145px; gap: 10px; }
+        .scan-form { display: grid; grid-template-columns: minmax(0, 1fr) 190px minmax(160px, 220px); gap: 10px; }
         input, select { width: 100%; min-width: 0; padding: 12px 13px; border: 1px solid #354158; border-radius: 9px; outline: none; background: var(--panel-soft); color: var(--text); }
         input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(129, 140, 248, .15); }
         input::placeholder { color: #778198; }
@@ -111,7 +111,14 @@
         .stage-title { margin-bottom: 8px; font-size: 13px; font-weight: 800; }
         .stage-status { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; font-weight: 750; }
         .stage-status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-        .stage-status.unknown { color: var(--amber); }
+        .stage-status.unknown, .stage-status.not_run, .stage-status.queued { color: var(--amber); }
+        .stage-status.running { color: var(--blue); }
+        .stage-status.passed { color: var(--green); }
+        .stage-status.failed, .stage-status.cancelled { color: var(--red); }
+        .pipeline-stage a { display: inline-block; margin-left: 6px; color: var(--blue); font-size: 11px; text-decoration: none; }
+        .pipeline-stage a:hover { text-decoration: underline; }
+        .pipeline-updated { margin-left: auto; color: var(--muted); font-size: 11px; white-space: nowrap; }
+        .pipeline-refresh { padding: 7px 10px; font-size: 12px; }
         .pipeline-note { margin: 14px 0 0; color: var(--muted); font-size: 12px; }
         .info-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
         .info-card { padding: 15px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-soft); min-width: 0; }
@@ -177,8 +184,8 @@
         </article>
         <article class="metric">
             <div class="metric-top"><span>Pipeline</span><span class="metric-icon" aria-hidden="true">⇄</span></div>
-            <div class="metric-value" id="pipelineStatus" style="font-size:21px">NOT CONNECTED</div>
-            <div class="metric-note">Live workflow status is not integrated</div>
+            <div class="metric-value" id="pipelineStatus" style="font-size:21px">CHECKING</div>
+            <div class="metric-note" id="pipelineMetricNote">GitHub Actions workflow status</div>
         </article>
         <article class="metric">
             <div class="metric-top"><span>Version</span><span class="metric-icon" aria-hidden="true">⌘</span></div>
@@ -245,17 +252,18 @@
         <div class="panel-heading">
             <div>
                 <h2 id="pipelineHeading">Security pipeline</h2>
-                <p>Stages used by the CodeShield GitHub Actions workflow.</p>
+                <p id="pipelineDescription">Live status from GitHub Actions.</p>
             </div>
+            <button class="button button-secondary pipeline-refresh" id="refreshPipeline" type="button">↻ Refresh</button>
         </div>
-        <div class="pipeline">
-            <article class="pipeline-stage"><div class="stage-title">🔎 Secret scan</div><span class="stage-status unknown">Status not connected</span></article>
-            <article class="pipeline-stage"><div class="stage-title">🐳 Docker build</div><span class="stage-status unknown">Status not connected</span></article>
-            <article class="pipeline-stage"><div class="stage-title">🧪 Automated tests</div><span class="stage-status unknown">Status not connected</span></article>
-            <article class="pipeline-stage"><div class="stage-title">🛡️ Image scan</div><span class="stage-status unknown">Status not connected</span></article>
-            <article class="pipeline-stage"><div class="stage-title">☁️ EC2 deployment</div><span class="stage-status unknown">Status not connected</span></article>
+        <div class="pipeline" id="pipelineStages" aria-live="polite">
+            <article class="pipeline-stage" data-stage="secret-scan"><div class="stage-title">🔎 Secret scan</div><span class="stage-status unknown">Loading…</span></article>
+            <article class="pipeline-stage" data-stage="docker-build"><div class="stage-title">🐳 Docker build</div><span class="stage-status unknown">Loading…</span></article>
+            <article class="pipeline-stage" data-stage="automated-tests"><div class="stage-title">🧪 Automated tests</div><span class="stage-status unknown">Loading…</span></article>
+            <article class="pipeline-stage" data-stage="image-scan"><div class="stage-title">🛡️ Image scan</div><span class="stage-status unknown">Loading…</span></article>
+            <article class="pipeline-stage" data-stage="ec2-deployment"><div class="stage-title">☁️ EC2 deployment</div><span class="stage-status unknown">Loading…</span></article>
         </div>
-        <p class="pipeline-note">These are workflow stages, not live status indicators. CodeShield does not claim a stage passed unless a live workflow integration is configured.</p>
+        <p class="pipeline-note" id="pipelineNote">Checking the latest workflow run…</p>
     </section>
 
     <section class="panel" aria-labelledby="serviceHeading">
@@ -295,6 +303,11 @@
     const serviceStatus = document.getElementById("serviceStatus");
     let latestScanData = null;
     const refreshHealth = document.getElementById("refreshHealth");
+    const refreshPipeline = document.getElementById("refreshPipeline");
+    const pipelineStatus = document.getElementById("pipelineStatus");
+    const pipelineMetricNote = document.getElementById("pipelineMetricNote");
+    const pipelineNote = document.getElementById("pipelineNote");
+    const pipelineDescription = document.getElementById("pipelineDescription");
     const allowedSeverities = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"];
 
     const targetExamples = {
@@ -324,20 +337,69 @@
         return element;
     }
 
+    function normalizeFindingDescription(description) {
+        if (!description) return "No description available.";
+
+        let text = String(description).replace(/\r\n?/g, "\n");
+
+        // Prefer Trivy's concise Summary section when a full Markdown report is supplied.
+        const summaryMatch = text.match(/(?:^|\n)\s*#{1,6}\s*Summary\s*\n([\s\S]*?)(?=\n\s*#{1,6}\s+|\s*$)/i);
+        if (summaryMatch && summaryMatch[1].trim()) {
+            text = summaryMatch[1].trim();
+        } else {
+            // Otherwise remove verbose report sections that do not belong in the card preview.
+            text = text.split(/\n\s*#{1,6}\s*(?:Details|PoC|Proof of Concept|Fix|Affected versions|Impact)\s*/i)[0];
+        }
+
+        text = text
+            .replace(/```[\s\S]*?```/g, " ")
+            .replace(/`([^`]+)`/g, "$1")
+            .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+            .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, "$1")
+            .replace(/^\s*#{1,6}\s*/gm, "")
+            .replace(/^\s*[-*+]\s+/gm, "")
+            .replace(/^\s*>\s?/gm, "")
+            .replace(/\*\*([^*]+)\*\*/g, "$1")
+            .replace(/\*([^*]+)\*/g, "$1")
+            .replace(/__([^_]+)__/g, "$1")
+            .replace(/_([^_]+)_/g, "$1")
+            .replace(/\n{2,}/g, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+
+        // Keep cards readable; the complete scanner output remains available in the scan JSON report.
+        const maxLength = 700;
+        if (text.length > maxLength) {
+            const cutoff = text.lastIndexOf(" ", maxLength);
+            text = text.slice(0, cutoff > 400 ? cutoff : maxLength).trimEnd() + "…";
+        }
+        return text || "No description available.";
+    }
+
+    function normalizeFindingTitle(title, packageName) {
+        let normalized = String(title || "Untitled finding").trim();
+        const packagePrefix = String(packageName || "").trim();
+        if (packagePrefix) {
+            const escaped = packagePrefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            normalized = normalized.replace(new RegExp("^(" + escaped + ":\\s*){2,}", "i"), packagePrefix + ": ");
+        }
+        return normalized;
+    }
+
     function renderFinding(finding) {
         const card = document.createElement("article");
         card.className = "finding";
 
         const header = document.createElement("div");
         header.className = "finding-header";
-        addTextElement(header, "div", "finding-title", finding.title || "Untitled finding");
+        addTextElement(header, "div", "finding-title", normalizeFindingTitle(finding.title, finding.package));
 
         const severityValue = String(finding.severity || "UNKNOWN").toUpperCase();
         const severity = addTextElement(header, "span", "severity", severityValue);
         severity.classList.add(allowedSeverities.includes(severityValue) ? severityValue : "UNKNOWN");
         card.appendChild(header);
 
-        addTextElement(card, "p", "finding-description", finding.description || "No description available.");
+        addTextElement(card, "p", "finding-description", normalizeFindingDescription(finding.description));
         addTextElement(card, "div", "finding-source", `Source: ${finding.source || "Unknown"}`);
 
         const metadata = document.createElement("div");
@@ -484,10 +546,86 @@
         showStatus("JSON report generated and download started.", "success");
     }
 
+    const pipelineLabels = {
+        passed: "Passed", failed: "Failed", running: "Running", queued: "Queued",
+        cancelled: "Cancelled", skipped: "Skipped", not_run: "Not run", unknown: "Unknown"
+    };
+
+    async function checkPipeline() {
+        refreshPipeline.disabled = true;
+        refreshPipeline.textContent = "Checking…";
+        try {
+            const response = await fetch("/api/pipeline", { headers: { "Accept": "application/json" }, cache: "no-store" });
+            const data = await response.json();
+            const stages = Array.isArray(data.stages) ? data.stages : [];
+            for (const stage of stages) {
+                const card = document.querySelector(`[data-stage="${stage.id}"]`);
+                if (!card) continue;
+                const statusElement = card.querySelector(".stage-status");
+                const status = Object.prototype.hasOwnProperty.call(pipelineLabels, stage.status) ? stage.status : "unknown";
+                statusElement.className = `stage-status ${status}`;
+                statusElement.textContent = pipelineLabels[status];
+                const oldLink = card.querySelector("a");
+                if (oldLink) oldLink.remove();
+                const linkUrl = stage.id === "ec2-deployment" ? data.deployment_url : data.workflow_url;
+                if (linkUrl && /^https:\/\/github\.com\//.test(linkUrl)) {
+                    const link = document.createElement("a");
+                    link.href = linkUrl;
+                    link.target = "_blank";
+                    link.rel = "noopener noreferrer";
+                    link.textContent = "View workflow ↗";
+                    card.appendChild(link);
+                }
+            }
+            const values = stages.map(stage => stage.status);
+            if (!response.ok || !data.available) {
+                pipelineStatus.textContent = "UNAVAILABLE";
+                pipelineMetricNote.textContent = "Could not retrieve workflow status";
+                pipelineDescription.textContent = "GitHub Actions status is temporarily unavailable.";
+                pipelineNote.textContent = data.error || "Check GitHub API access and try again.";
+            } else if (!values.length || values.every(value => value === "not_run" || value === "unknown")) {
+                pipelineStatus.textContent = "NO RUNS";
+                pipelineMetricNote.textContent = "No matching workflow runs found";
+                pipelineDescription.textContent = `Repository: ${data.repository} · Branch: ${data.branch}`;
+                pipelineNote.textContent = "No matching workflow run was found. Check that the workflow files are committed and have run on GitHub.";
+            } else if (values.includes("failed")) {
+                pipelineStatus.textContent = "FAILING";
+                pipelineMetricNote.textContent = "At least one stage failed";
+                pipelineDescription.textContent = `Live GitHub Actions status · ${data.repository} (${data.branch})`;
+                pipelineNote.textContent = "Statuses reflect the latest matching CI run and latest manual deployment run.";
+            } else if (values.includes("running") || values.includes("queued")) {
+                pipelineStatus.textContent = "IN PROGRESS";
+                pipelineMetricNote.textContent = "A workflow stage is active";
+                pipelineDescription.textContent = `Live GitHub Actions status · ${data.repository} (${data.branch})`;
+                pipelineNote.textContent = "Statuses refresh automatically every 60 seconds. Deployment runs only when manually triggered.";
+            } else {
+                pipelineStatus.textContent = "CONNECTED";
+                pipelineMetricNote.textContent = "GitHub Actions status connected";
+                pipelineDescription.textContent = `Live GitHub Actions status · ${data.repository} (${data.branch})`;
+                pipelineNote.textContent = "Statuses refresh automatically every 60 seconds. Deployment runs only when manually triggered.";
+            }
+        } catch (_error) {
+            pipelineStatus.textContent = "UNAVAILABLE";
+            pipelineMetricNote.textContent = "Could not retrieve workflow status";
+            pipelineDescription.textContent = "GitHub Actions status is temporarily unavailable.";
+            pipelineNote.textContent = "The dashboard could not contact its pipeline-status endpoint. Try refreshing.";
+            document.querySelectorAll(".pipeline-stage .stage-status").forEach(element => {
+                element.className = "stage-status unknown";
+                element.textContent = "Unknown";
+            });
+        } finally {
+            refreshPipeline.disabled = false;
+            refreshPipeline.textContent = "↻ Refresh";
+        }
+    }
+
     refreshHealth.addEventListener("click", checkService);
+    refreshPipeline.addEventListener("click", checkPipeline);
+    window.setInterval(checkPipeline, 60000);
     findingFilter.addEventListener("change", renderFindings);
     downloadReport.addEventListener("click", downloadJsonReport);
     checkService();
+    checkPipeline();
 
     scanForm.addEventListener("submit", async event => {
         event.preventDefault();
@@ -503,9 +641,10 @@
         latestScanData = null;
 
         try {
+            const headers = { "Content-Type": "application/json", "Accept": "application/json" };
             const response = await fetch("/api/scan", {
                 method: "POST",
-                headers: { "Content-Type": "application/json", "Accept": "application/json" },
+                headers,
                 body: JSON.stringify({ target, scan_type: scanType })
             });
             const data = await response.json().catch(() => ({}));

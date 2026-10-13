@@ -1,11 +1,15 @@
-﻿from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request
+from dotenv import load_dotenv
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from datetime import datetime, timezone
-from urllib.parse import urlparse
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, build_opener, HTTPRedirectHandler
+from urllib.parse import quote, urlparse
+import http.client
 import ipaddress
 import socket
+import ssl
+import threading
+import hmac
 
 import json
 import os
@@ -14,10 +18,18 @@ import shutil
 import subprocess
 import tempfile
 import time
+import urllib.error
+import urllib.request
+from collections import defaultdict, deque
 
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 1024 * 1024  # Limit scan API request bodies to 1 MiB.
+
+# In-process rate limiting is a useful single-instance abuse guard. For multi-worker
+# deployments, put a shared rate limiter at the proxy/API gateway.
+_RATE_LIMIT_LOCK = threading.Lock()
+_RATE_LIMIT_BUCKETS = defaultdict(deque)
 
 
 # ============================================================
@@ -35,6 +47,11 @@ ENVIRONMENT = os.getenv(
     "ENVIRONMENT",
     "development"
 )
+
+# In production the app is reachable only through the single Caddy reverse proxy.
+# Trust one forwarded client IP/protocol hop there; local development trusts no proxy.
+if ENVIRONMENT.strip().lower() == "production":
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 
 GITLEAKS_PATH = os.getenv(
     "GITLEAKS_PATH",
@@ -158,8 +175,6 @@ def clone_repository(repository_url):
     command = [
         GIT_PATH,
         "clone",
-        "--depth",
-        "1",
         clone_url,
         repository_directory
     ]
@@ -169,7 +184,7 @@ def clone_repository(repository_url):
             command,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=300,
             check=False
         )
 
@@ -192,23 +207,17 @@ def clone_repository(repository_url):
         )
 
         raise RuntimeError(
-            "Repository clone timed out."
+            "Repository clone timed out after 5 minutes."
         )
 
     if result.returncode != 0:
-
-        error_message = result.stderr.strip()
 
         shutil.rmtree(
             temporary_directory,
             ignore_errors=True
         )
-
-        if not error_message:
-            error_message = "Git clone failed."
-
         raise RuntimeError(
-            error_message
+            "Git clone failed. Verify that the public repository exists and is accessible."
         )
 
     file_count = 0
@@ -310,28 +319,13 @@ def run_gitleaks_scan(repository_directory):
             1
         ):
 
-            error_message = (
-                result.stderr.strip()
-            )
-
-            if not error_message:
-                error_message = (
-                    "Gitleaks scan failed."
-                )
-
-            raise RuntimeError(
-                error_message
-            )
+            raise RuntimeError("Gitleaks scan failed. Check server logs for details.")
 
         # Gitleaks normally creates the JSON report
         # even when there are no findings.
 
-        if not os.path.exists(
-            report_path
-        ):
-
-            gitleaks_results = []
-
+        if not os.path.isfile(report_path):
+            raise RuntimeError("Gitleaks did not generate a JSON report.")
         else:
 
             try:
@@ -346,12 +340,15 @@ def run_gitleaks_scan(repository_directory):
                         json.load(report_file)
                     )
 
-            except json.JSONDecodeError:
+            except (OSError, json.JSONDecodeError, UnicodeDecodeError):
 
                 raise RuntimeError(
                     "Gitleaks returned an invalid "
                     "JSON report."
                 )
+
+        if not isinstance(gitleaks_results, list) or any(not isinstance(item, dict) for item in gitleaks_results):
+            raise RuntimeError("Gitleaks returned an invalid JSON report.")
 
         findings = []
 
@@ -441,8 +438,7 @@ def run_trivy_scan(repository_directory):
             raise RuntimeError("Trivy vulnerability scan timed out.") from error
 
         if result.returncode != 0:
-            error_message = result.stderr.strip() or "Trivy vulnerability scan failed."
-            raise RuntimeError(error_message)
+            raise RuntimeError("Trivy vulnerability scan failed. Check server logs for details.")
 
         if not os.path.isfile(report_path):
             raise RuntimeError("Trivy did not generate a JSON report.")
@@ -450,19 +446,24 @@ def run_trivy_scan(repository_directory):
         try:
             with open(report_path, "r", encoding="utf-8") as report_file:
                 trivy_results = json.load(report_file)
-        except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError) as error:
             raise RuntimeError("Trivy returned an invalid JSON report.") from error
 
         if not isinstance(trivy_results, dict):
             raise RuntimeError("Trivy returned an unexpected JSON report format.")
 
+        results = trivy_results.get("Results") or []
+        if not isinstance(results, list):
+            raise RuntimeError("Trivy returned an unexpected vulnerability report format.")
         findings = []
-        for target in trivy_results.get("Results") or []:
+        for target in results:
             if not isinstance(target, dict):
                 continue
 
             target_name = target.get("Target", "unknown target")
             vulnerabilities = target.get("Vulnerabilities") or []
+            if not isinstance(vulnerabilities, list):
+                continue
 
             for vulnerability in vulnerabilities:
                 if not isinstance(vulnerability, dict):
@@ -508,17 +509,17 @@ def calculate_security_score(findings):
     """
     Calculate a security score from 0-100.
 
-    Penalties:
+    Each finding reduces the remaining score by a percentage:
 
-        CRITICAL = 25
-        HIGH     = 15
-        MEDIUM   = 7
-        LOW      = 2
+        CRITICAL = 25%
+        HIGH     = 15%
+        MEDIUM   = 7%
+        LOW      = 2%
     """
 
     score = 100
 
-    severity_penalties = {
+    severity_penalty_percentages = {
         "CRITICAL": 25,
         "HIGH": 15,
         "MEDIUM": 7,
@@ -526,24 +527,13 @@ def calculate_security_score(findings):
     }
 
     for finding in findings:
+        if not isinstance(finding, dict):
+            continue
+        severity = str(finding.get("severity", "UNKNOWN")).upper()
+        penalty = severity_penalty_percentages.get(severity, 0)
+        score *= (100 - penalty) / 100
 
-        severity = finding.get(
-            "severity",
-            "LOW"
-        )
-
-        score -= severity_penalties.get(
-            severity,
-            0
-        )
-
-    return max(
-        0,
-        min(
-            100,
-            score
-        )
-    )
+    return max(0, min(100, int(score + 0.5)))
 
 
 # ============================================================
@@ -566,7 +556,8 @@ def calculate_finding_statistics(findings):
     }
 
     for finding in findings:
-
+        if not isinstance(finding, dict):
+            continue
         severity = str(
             finding.get(
                 "severity",
@@ -598,74 +589,199 @@ def calculate_finding_statistics(findings):
 # Endpoint and Container Scanning
 # ============================================================
 
-class _NoRedirectHandler(HTTPRedirectHandler):
-    """Do not follow redirects; each redirect target must be reviewed separately."""
+def _is_public_destination(address):
+    """Return True only for globally routable IP addresses."""
+    if isinstance(address, str):
+        try:
+            address = ipaddress.ip_address(address.split("%", 1)[0])
+        except ValueError:
+            return False
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
+        address = address.ipv4_mapped
+    if isinstance(address, ipaddress.IPv6Address):
+        # Do not allow transition/tunnelling ranges that can encode IPv4 targets.
+        transition_ranges = (
+            ipaddress.ip_network("64:ff9b::/96"),
+            ipaddress.ip_network("64:ff9b:1::/48"),
+            ipaddress.ip_network("2002::/16"),
+            ipaddress.ip_network("2001::/32"),
+        )
+        if any(address in network for network in transition_ranges):
+            return False
+    return bool(
+        address.is_global
+        and not address.is_private
+        and not address.is_loopback
+        and not address.is_link_local
+        and not address.is_multicast
+        and not address.is_reserved
+        and not address.is_unspecified
+    )
 
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
+
+def _resolve_public_http_target(value):
+    """Validate a public HTTP(S) URL and return its parsed URL plus a pinned IP.
+
+    Every DNS answer must be globally routable. The selected address is later used
+    directly for the socket connection so a second DNS lookup cannot rebind the
+    target between validation and connection.
+    """
+    if not isinstance(value, str) or not value or len(value) > 2048:
+        return None
+    if any(character.isspace() or ord(character) < 32 or ord(character) == 127 for character in value):
+        return None
+
+    try:
+        parsed = urlparse(value.strip())
+        scheme = parsed.scheme.lower()
+        if scheme not in {"http", "https"}:
+            return None
+        if not parsed.hostname or parsed.username is not None or parsed.password is not None:
+            return None
+        if parsed.netloc.endswith(":"):
+            return None
+        port = parsed.port
+        expected_port = 443 if scheme == "https" else 80
+        if port not in (None, expected_port):
+            return None
+
+        host = parsed.hostname.rstrip(".").lower()
+        if not host or "%" in host:
+            return None
+        if host == "localhost" or host.endswith((".localhost", ".local", ".internal", ".home.arpa", ".test", ".invalid", ".example")):
+            return None
+
+        is_ip_literal = False
+        try:
+            literal_address = ipaddress.ip_address(host)
+            is_ip_literal = True
+            addresses = [literal_address]
+            connect_host = str(literal_address)
+            certificate_host = str(literal_address)
+        except ValueError:
+            connect_host = host.encode("idna").decode("ascii")
+            certificate_host = connect_host
+            results = socket.getaddrinfo(
+                connect_host,
+                port or expected_port,
+                type=socket.SOCK_STREAM,
+            )
+            addresses = []
+            for result in results:
+                sockaddr = result[4]
+                addresses.append(ipaddress.ip_address(sockaddr[0].split("%", 1)[0]))
+
+        if not addresses or any(not _is_public_destination(address) for address in addresses):
+            return None
+
+        # Normalize the authority so Host and TLS SNI use the validated hostname.
+        if is_ip_literal and isinstance(addresses[0], ipaddress.IPv6Address):
+            authority_host = f"[{connect_host}]"
+        else:
+            authority_host = connect_host
+        if port is not None:
+            authority = f"{authority_host}:{port}"
+        else:
+            authority = authority_host
+        normalized_path = quote(parsed.path or "/", safe="/%:@!$&'()*+,;=-._~")
+        normalized_query = quote(parsed.query, safe="/?%:@!$&'()*+,;=-._~")
+        path = f"{normalized_path}?{normalized_query}" if normalized_query else normalized_path
+        safe_url = parsed._replace(
+            netloc=authority,
+            path=normalized_path,
+            query=normalized_query,
+            fragment="",
+        ).geturl()
+        return {
+            "parsed": parsed,
+            "scheme": scheme,
+            "host": certificate_host,
+            "port": port or expected_port,
+            "connect_ip": str(addresses[0]),
+            "authority": authority,
+            "path": path,
+            "url": safe_url,
+        }
+    except (ValueError, OSError, socket.gaierror, UnicodeError):
         return None
 
 
 def validate_public_http_url(value):
-    """Validate an HTTP(S) target and reject local/private network destinations."""
-    if not isinstance(value, str) or len(value) > 2048:
-        return None
-    try:
-        parsed = urlparse(value.strip())
-        if parsed.scheme.lower() not in {"http", "https"}:
-            return None
-        if not parsed.hostname or parsed.username or parsed.password:
-            return None
-        if parsed.port not in (None, 80, 443):
-            # Restrict scanning to conventional web ports.
-            return None
-        if parsed.scheme.lower() == "https" and parsed.port not in (None, 443):
-            return None
-        if parsed.scheme.lower() == "http" and parsed.port not in (None, 80):
-            return None
-        host = parsed.hostname.rstrip(".").lower()
-        if host == "localhost" or host.endswith(".localhost") or host.endswith(".local"):
-            return None
+    """Return a normalized public HTTP(S) URL, or None when it is not safe."""
+    validated = _resolve_public_http_target(value)
+    return validated["url"] if validated else None
+
+
+class _PinnedHTTPConnection(http.client.HTTPConnection):
+    """HTTP connection that connects to a previously validated numeric IP."""
+    def __init__(self, host, port, connect_ip, timeout=8):
+        super().__init__(host, port=port, timeout=timeout)
+        self.connect_ip = connect_ip
+
+    def connect(self):
+        self.sock = socket.create_connection(
+            (self.connect_ip, self.port),
+            self.timeout,
+            self.source_address,
+        )
+
+
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """HTTPS connection pinned to an IP while retaining hostname TLS checks."""
+    def __init__(self, host, port, connect_ip, timeout=8):
+        super().__init__(host, port=port, timeout=timeout, context=ssl.create_default_context())
+        self.connect_ip = connect_ip
+
+    def connect(self):
+        raw_socket = socket.create_connection(
+            (self.connect_ip, self.port),
+            self.timeout,
+            self.source_address,
+        )
         try:
-            addresses = [ipaddress.ip_address(host)]
-        except ValueError:
-            addresses = [
-                ipaddress.ip_address(item[4][0])
-                for item in socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80), type=socket.SOCK_STREAM)
-            ]
-        if not addresses or any(
-            not addr.is_global or addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_multicast or addr.is_reserved
-            for addr in addresses
-        ):
-            return None
-        return parsed.geturl()
-    except (ValueError, OSError, socket.gaierror):
-        return None
+            self.sock = self._context.wrap_socket(raw_socket, server_hostname=self.host)
+        except Exception:
+            raw_socket.close()
+            raise
+
+
+def _make_pinned_connection(validated, timeout=8):
+    connection_class = _PinnedHTTPSConnection if validated["scheme"] == "https" else _PinnedHTTPConnection
+    return connection_class(
+        validated["host"],
+        validated["port"],
+        validated["connect_ip"],
+        timeout=timeout,
+    )
 
 
 def run_endpoint_scan(target):
-    """Check a public web endpoint's availability and common security headers."""
-    safe_url = validate_public_http_url(target)
-    if safe_url is None:
+    """Check a public web endpoint without following redirects or re-resolving DNS."""
+    validated = _resolve_public_http_target(target)
+    if validated is None:
         raise ValueError("Endpoint must be a public HTTP(S) URL on a standard web port. Private, local, and non-public destinations are blocked.")
 
-    request = Request(
-        safe_url,
-        headers={"User-Agent": "CodeShield-Scanner/1.0", "Accept": "*/*"},
-        method="GET",
-    )
-    opener = build_opener(_NoRedirectHandler)
+    connection = _make_pinned_connection(validated, timeout=8)
     try:
-        with opener.open(request, timeout=8) as response:
-            status = response.status
-            headers = response.headers
-            # Read only a small prefix so endpoints cannot force large downloads.
-            response.read(4096)
-    except HTTPError as error:
-        # HTTP errors still carry useful response headers and indicate a reachable endpoint.
-        status = error.code
-        headers = error.headers
-    except (URLError, TimeoutError, OSError) as error:
+        connection.request(
+            "GET",
+            validated["path"],
+            headers={
+                "Host": validated["authority"],
+                "User-Agent": "CodeShield-Scanner/1.0",
+                "Accept": "*/*",
+                "Connection": "close",
+            },
+        )
+        response = connection.getresponse()
+        status = response.status
+        headers = response.headers
+        # Read a small prefix only; redirects are returned, never followed.
+        response.read(4096)
+    except (TimeoutError, OSError, http.client.HTTPException, ssl.SSLError, UnicodeError) as error:
         raise RuntimeError(f"Endpoint request failed: {type(error).__name__}. Check the URL and try again.") from error
+    finally:
+        connection.close()
 
     findings = []
     checks = [
@@ -677,8 +793,7 @@ def run_endpoint_scan(target):
     ]
     for header, severity, title, description in checks:
         if not headers.get(header):
-            # HSTS is meaningful only over HTTPS.
-            if header == "Strict-Transport-Security" and not safe_url.lower().startswith("https://"):
+            if header == "Strict-Transport-Security" and validated["scheme"] != "https":
                 continue
             findings.append({
                 "severity": severity,
@@ -686,7 +801,7 @@ def run_endpoint_scan(target):
                 "description": description,
                 "source": "HTTP",
                 "rule_id": f"missing-{header.lower()}",
-                "file": urlparse(safe_url).netloc,
+                "file": validated["authority"],
             })
     if status >= 500:
         findings.append({
@@ -695,7 +810,16 @@ def run_endpoint_scan(target):
             "description": f"The endpoint responded with HTTP {status}. Review server logs and error handling.",
             "source": "HTTP",
             "rule_id": "http-server-error",
-            "file": urlparse(safe_url).netloc,
+            "file": validated["authority"],
+        })
+    elif 300 <= status < 400:
+        findings.append({
+            "severity": "INFO",
+            "title": "Endpoint returned a redirect",
+            "description": "The redirect was not followed. Scan the destination separately after confirming it is an authorized public endpoint.",
+            "source": "HTTP",
+            "rule_id": "http-redirect-not-followed",
+            "file": validated["authority"],
         })
     return findings
 
@@ -732,18 +856,29 @@ def run_trivy_image_scan(image_reference):
             command, capture_output=True, text=True, timeout=360, check=False,
         )
         if result.returncode != 0:
-            detail = (result.stderr or result.stdout or "Trivy could not scan this image.").strip()
-            raise RuntimeError(f"Container scan failed: {detail[-1200:]}")
+            raise RuntimeError("Container scan failed. Check server logs for details.")
         try:
             with open(report_path, "r", encoding="utf-8") as report_file:
                 report = json.load(report_file)
-        except (OSError, json.JSONDecodeError) as error:
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError) as error:
             raise RuntimeError("Trivy did not produce a valid image scan report.") from error
 
+        if not isinstance(report, dict):
+            raise RuntimeError("Trivy returned an invalid image scan report.")
+        results = report.get("Results") or []
+        if not isinstance(results, list):
+            raise RuntimeError("Trivy returned an invalid image scan report.")
         findings = []
-        for item in report.get("Results") or []:
+        for item in results:
+            if not isinstance(item, dict):
+                continue
             target = item.get("Target", "container image")
-            for vuln in item.get("Vulnerabilities") or []:
+            vulnerabilities = item.get("Vulnerabilities") or []
+            if not isinstance(vulnerabilities, list):
+                continue
+            for vuln in vulnerabilities:
+                if not isinstance(vuln, dict):
+                    continue
                 findings.append({
                     "severity": str(vuln.get("Severity") or "UNKNOWN").upper(),
                     "title": vuln.get("Title") or vuln.get("VulnerabilityID") or "Container vulnerability",
@@ -757,6 +892,8 @@ def run_trivy_image_scan(image_reference):
                     "references": (vuln.get("References") or [])[:5],
                 })
         return findings
+    except FileNotFoundError as error:
+        raise RuntimeError("Trivy was not found. Configure TRIVY_PATH.") from error
     except subprocess.TimeoutExpired as error:
         raise RuntimeError("Container scan timed out after 6 minutes.") from error
     finally:
@@ -780,20 +917,34 @@ def run_trivy_config_scan(repository_directory):
         except subprocess.TimeoutExpired as error:
             raise RuntimeError("Trivy configuration scan timed out.") from error
         if result.returncode != 0:
-            raise RuntimeError((result.stderr or "Trivy configuration scan failed.")[-1200:])
+            raise RuntimeError("Trivy configuration scan failed. Check server logs for details.")
         try:
             with open(report_path, "r", encoding="utf-8") as handle:
                 report = json.load(handle)
-        except (OSError, json.JSONDecodeError) as error:
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError) as error:
             raise RuntimeError("Trivy did not produce a valid configuration report.") from error
+        if not isinstance(report, dict):
+            raise RuntimeError("Trivy returned an invalid configuration report.")
+        results = report.get("Results") or []
+        if not isinstance(results, list):
+            raise RuntimeError("Trivy returned an invalid configuration report.")
         findings = []
-        for item in report.get("Results") or []:
+        for item in results:
+            if not isinstance(item, dict):
+                continue
             target = item.get("Target", "unknown target")
-            for misconfig in item.get("Misconfigurations") or []:
+            misconfigurations = item.get("Misconfigurations") or []
+            if not isinstance(misconfigurations, list):
+                continue
+            for misconfig in misconfigurations:
+                if not isinstance(misconfig, dict):
+                    continue
                 severity = str(misconfig.get("Severity") or "UNKNOWN").upper()
                 if severity not in {"CRITICAL", "HIGH", "MEDIUM", "LOW"}:
                     severity = "UNKNOWN"
                 cause = misconfig.get("CauseMetadata") or {}
+                if not isinstance(cause, dict):
+                    cause = {}
                 findings.append({
                     "severity": severity,
                     "title": misconfig.get("Title") or misconfig.get("ID") or "Infrastructure misconfiguration",
@@ -812,6 +963,21 @@ def run_trivy_config_scan(repository_directory):
 # ============================================================
 # Security Scanner
 # ============================================================
+
+def deduplicate_findings(findings):
+    """Remove exact duplicate findings while retaining distinct report details."""
+    unique = []
+    seen = set()
+    for finding in findings:
+        if not isinstance(finding, dict):
+            continue
+        key = json.dumps(finding, sort_keys=True, separators=(",", ":"), default=str)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(finding)
+    return unique
+
 
 def run_security_scan(
     target,
@@ -861,13 +1027,9 @@ def run_security_scan(
     elif scan_type == "container":
         findings = run_trivy_image_scan(target)
 
-    score = calculate_security_score(
-        findings
-    )
-
-    statistics = calculate_finding_statistics(
-        findings
-    )
+    findings = deduplicate_findings(findings)
+    score = calculate_security_score(findings)
+    statistics = calculate_finding_statistics(findings)
 
     return {
 
@@ -890,8 +1052,71 @@ def run_security_scan(
 
 
 # ============================================================
-# Routes
+# Request hardening and routes
 # ============================================================
+
+@app.after_request
+def add_security_headers(response):
+    """Apply baseline browser security headers to dashboard and API responses."""
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; "
+        "form-action 'self'; frame-ancestors 'none'"
+    )
+    if request.path == "/api/scan":
+        response.headers["Cache-Control"] = "no-store"
+    if os.getenv("ENVIRONMENT", ENVIRONMENT).strip().lower() == "production":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000"
+    return response
+
+
+@app.errorhandler(413)
+def request_too_large(_error):
+    return jsonify({"error": "Request body exceeds the 1 MiB limit."}), 413
+
+
+def _check_scan_api_access():
+    """Require a configured token in production and enforce a per-IP rate limit."""
+    try:
+        limit = max(1, int(os.getenv("SCAN_RATE_LIMIT_REQUESTS", "60")))
+        window = max(1, int(os.getenv("SCAN_RATE_LIMIT_WINDOW_SECONDS", "60")))
+    except ValueError:
+        limit, window = 60, 60
+    now = time.monotonic()
+    client_ip = request.remote_addr or "unknown"
+    with _RATE_LIMIT_LOCK:
+        if len(_RATE_LIMIT_BUCKETS) > 1000:
+            for known_ip, history in list(_RATE_LIMIT_BUCKETS.items()):
+                while history and now - history[0] >= window:
+                    history.popleft()
+                if not history:
+                    _RATE_LIMIT_BUCKETS.pop(known_ip, None)
+        bucket = _RATE_LIMIT_BUCKETS[client_ip]
+        while bucket and now - bucket[0] >= window:
+            bucket.popleft()
+        if len(bucket) >= limit:
+            response = jsonify({"error": "Scan rate limit exceeded. Please wait before trying again."})
+            response.status_code = 429
+            response.headers["Retry-After"] = str(max(1, int(window - (now - bucket[0]))))
+            return response
+        bucket.append(now)
+
+    configured_token = os.getenv("SCAN_API_TOKEN", "").strip()
+    production_mode = os.getenv("ENVIRONMENT", ENVIRONMENT).strip().lower() == "production"
+    if production_mode and not configured_token:
+        return jsonify({"error": "Scan API authentication is not configured."}), 503
+    if production_mode and len(configured_token) < 32:
+        return jsonify({"error": "The production scan API token must contain at least 32 characters."}), 503
+    if configured_token:
+        supplied_token = request.headers.get("X-Scan-Token", "")
+        if not hmac.compare_digest(supplied_token.encode("utf-8"), configured_token.encode("utf-8")):
+            return jsonify({"error": "A valid X-Scan-Token header is required."}), 401
+    return None
+
 
 @app.route("/")
 def home():
@@ -950,6 +1175,137 @@ def info():
 
 
 # ============================================================
+# GitHub Actions Pipeline Status
+# ============================================================
+
+load_dotenv()
+
+GITHUB_REPOSITORY = os.getenv("GITHUB_REPOSITORY", "arunava-12/CodeShield").strip()
+GITHUB_BRANCH = os.getenv("GITHUB_BRANCH", "codeshield-dev").strip()
+GITHUB_API_TOKEN = os.getenv("GITHUB_API_TOKEN", "").strip()
+GITHUB_API_BASE = "https://api.github.com"
+
+
+def _github_api_json(path):
+    """Fetch a GitHub REST API JSON resource without exposing credentials to clients."""
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", GITHUB_REPOSITORY):
+        raise ValueError("GITHUB_REPOSITORY must use owner/repository format.")
+    request_headers = {
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "CodeShield-Pipeline-Dashboard",
+    }
+    if GITHUB_API_TOKEN:
+        request_headers["Authorization"] = f"Bearer {GITHUB_API_TOKEN}"
+    api_request = urllib.request.Request(
+        f"{GITHUB_API_BASE}{path}", headers=request_headers, method="GET"
+    )
+    with urllib.request.urlopen(api_request, timeout=8) as response:
+        return json.loads(response.read(1024 * 1024).decode("utf-8"))
+
+
+def _normalize_pipeline_status(status, conclusion=None):
+    """Convert GitHub workflow/job/step state into a small dashboard vocabulary."""
+    if status in {"queued", "waiting", "pending", "requested", "in_progress"}:
+        return "running" if status == "in_progress" else "queued"
+    if status == "completed":
+        if conclusion == "success":
+            return "passed"
+        if conclusion in {"failure", "timed_out", "action_required"}:
+            return "failed"
+        if conclusion == "cancelled":
+            return "cancelled"
+        if conclusion == "skipped":
+            return "skipped"
+    return "unknown"
+
+
+def _find_step_status(jobs, job_name, step_name):
+    for job in jobs:
+        if job.get("name") != job_name:
+            continue
+        for step in job.get("steps", []):
+            if step.get("name") == step_name:
+                return _normalize_pipeline_status(step.get("status"), step.get("conclusion"))
+    return "unknown"
+
+
+def _workflow_run(path):
+    payload = _github_api_json(path)
+    runs = payload.get("workflow_runs", [])
+    return runs[0] if runs else None
+
+
+@app.route("/api/pipeline")
+def pipeline_status():
+    """Return live GitHub Actions statuses for the dashboard's pipeline cards."""
+    repository_path = f"/repos/{GITHUB_REPOSITORY}"
+    try:
+        ci_run = _workflow_run(
+            f"{repository_path}/actions/workflows/cloudsentinel-ci.yml/runs?branch={quote(GITHUB_BRANCH)}&per_page=1"
+        )
+        deploy_run = _workflow_run(
+            f"{repository_path}/actions/workflows/deploy.yml/runs?branch=main&per_page=1"
+        )
+        if ci_run:
+            jobs_payload = _github_api_json(
+                f"{repository_path}/actions/runs/{int(ci_run['id'])}/jobs?per_page=100"
+            )
+            jobs = jobs_payload.get("jobs", [])
+            secret_status = next((
+                _normalize_pipeline_status(job.get("status"), job.get("conclusion"))
+                for job in jobs if job.get("name") == "Security Scan"
+            ), "unknown")
+            docker_status = _find_step_status(jobs, "Test Application", "Build Docker image")
+            test_status = _find_step_status(jobs, "Test Application", "Run tests")
+            image_status = _find_step_status(jobs, "Test Application", "Scan Docker image")
+            ci_url = ci_run.get("html_url")
+            ci_updated = ci_run.get("updated_at") or ci_run.get("created_at")
+        else:
+            secret_status = docker_status = test_status = image_status = "not_run"
+            ci_url = None
+            ci_updated = None
+
+        deploy_status = (
+            _normalize_pipeline_status(deploy_run.get("status"), deploy_run.get("conclusion"))
+            if deploy_run else "not_run"
+        )
+        return jsonify({
+            "repository": GITHUB_REPOSITORY,
+            "branch": GITHUB_BRANCH,
+            "available": True,
+            "updated_at": ci_updated,
+            "workflow_url": ci_url,
+            "deployment_url": deploy_run.get("html_url") if deploy_run else None,
+            "stages": [
+                {"id": "secret-scan", "label": "Secret scan", "status": secret_status},
+                {"id": "docker-build", "label": "Docker build", "status": docker_status},
+                {"id": "automated-tests", "label": "Automated tests", "status": test_status},
+                {"id": "image-scan", "label": "Image scan", "status": image_status},
+                {"id": "ec2-deployment", "label": "EC2 deployment", "status": deploy_status},
+            ],
+        })
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as error:
+        app.logger.exception("Unable to retrieve GitHub Actions status")
+        return jsonify({
+            "available": False,
+            "error": "GitHub Actions status is temporarily unavailable.",
+            "repository": GITHUB_REPOSITORY,
+            "branch": GITHUB_BRANCH,
+            "stages": [
+                {"id": stage_id, "label": label, "status": "unknown"}
+                for stage_id, label in [
+                    ("secret-scan", "Secret scan"),
+                    ("docker-build", "Docker build"),
+                    ("automated-tests", "Automated tests"),
+                    ("image-scan", "Image scan"),
+                    ("ec2-deployment", "EC2 deployment"),
+                ]
+            ],
+        }), 502
+
+
+# ============================================================
 # Security Scan API
 # ============================================================
 
@@ -958,6 +1314,10 @@ def info():
     methods=["POST"]
 )
 def scan():
+
+    access_error = _check_scan_api_access()
+    if access_error is not None:
+        return access_error
 
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
@@ -1090,6 +1450,10 @@ def scan():
 
             }), 500
 
+        except Exception:
+            app.logger.exception("Repository scan failed unexpectedly")
+            return jsonify({"error": "The repository scan failed unexpectedly. Check server logs for details."}), 500
+
         finally:
 
             # Always remove cloned repository.
@@ -1134,6 +1498,10 @@ def scan():
 
         }), 500
 
+    except Exception:
+        app.logger.exception("Scan failed unexpectedly")
+        return jsonify({"error": "The scan failed unexpectedly. Check server logs for details."}), 500
+
 
 # ============================================================
 # Application Entry Point
@@ -1148,4 +1516,3 @@ if __name__ == "__main__":
         port=5000
 
     )
-

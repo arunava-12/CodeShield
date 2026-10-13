@@ -35,3 +35,9 @@ venv/
 .env
 .env.*
 !.env.example
+
+# Application logs and local scan data
+codeshield-error.log
+*.log
+data/
+*.sqlite3
