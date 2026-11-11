@@ -1,0 +1,48 @@
+CodeShield - Windows Quick Start
+================================
+
+Run these commands in PowerShell from the CodeShield project folder.
+You need Python 3.12 or newer installed. Verify with: py --version
+
+First-time setup
+----------------
+1. Create a virtual environment:
+   py -3 -m venv .venv
+
+2. Activate it:
+   .\.venv\Scripts\Activate.ps1
+
+   If PowerShell blocks activation, run this once, then activate again:
+   Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+
+3. Install the app dependencies:
+   python -m pip install -r app\requirements.txt
+
+Start the app
+-------------
+From the project folder, with the virtual environment activated:
+   python app\app.py
+
+Open http://localhost:5000 in your browser.
+Health check: http://localhost:5000/health
+Stop the server with Ctrl+C.
+
+The app uses development defaults when optional environment variables are not
+set. Do not put secrets in source files or commit your .env file.
+
+Run tests (optional)
+--------------------
+Install the test dependency:
+   python -m pip install -r app\requirements-dev.txt
+
+Then run from the project folder:
+   $env:PYTHONPATH = "."
+   python -m pytest -q
+
+Run with Docker (optional)
+--------------------------
+With Docker Desktop running, from the project folder:
+   docker build -t codeshield .
+   docker run --rm -p 5000:5000 codeshield
+
+Open http://localhost:5000. Stop the container with Ctrl+C.
