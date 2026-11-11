@@ -24,6 +24,56 @@ from collections import defaultdict, deque
 
 
 app = Flask(__name__)
+
+
+# ============================================================
+# Dashboard Authentication
+# ============================================================
+
+@app.before_request
+def require_dashboard_authentication():
+    """Protect the dashboard and API using HTTP Basic Authentication."""
+
+    # Keep Render health checks publicly accessible.
+    if request.path == "/health":
+        return None
+
+    expected_username = os.getenv("DASHBOARD_USERNAME", "")
+    expected_password = os.getenv("DASHBOARD_PASSWORD", "")
+
+    if not expected_username or not expected_password:
+        return jsonify({
+            "error": "Dashboard authentication is not configured."
+        }), 503
+
+    credentials = request.authorization
+
+    valid_credentials = (
+        credentials is not None
+        and credentials.type.lower() == "basic"
+        and hmac.compare_digest(
+            credentials.username or "",
+            expected_username
+        )
+        and hmac.compare_digest(
+            credentials.password or "",
+            expected_password
+        )
+    )
+
+    if not valid_credentials:
+        response = jsonify({
+            "error": "Authentication required."
+        })
+        response.status_code = 401
+        response.headers["WWW-Authenticate"] = (
+            'Basic realm="CodeShield", charset="UTF-8"'
+        )
+        return response
+
+    return None
+
+
 app.config["MAX_CONTENT_LENGTH"] = 1024 * 1024  # Limit scan API request bodies to 1 MiB.
 
 # In-process rate limiting is a useful single-instance abuse guard. For multi-worker
@@ -1105,16 +1155,6 @@ def _check_scan_api_access():
             return response
         bucket.append(now)
 
-    configured_token = os.getenv("SCAN_API_TOKEN", "").strip()
-    production_mode = os.getenv("ENVIRONMENT", ENVIRONMENT).strip().lower() == "production"
-    if production_mode and not configured_token:
-        return jsonify({"error": "Scan API authentication is not configured."}), 503
-    if production_mode and len(configured_token) < 32:
-        return jsonify({"error": "The production scan API token must contain at least 32 characters."}), 503
-    if configured_token:
-        supplied_token = request.headers.get("X-Scan-Token", "")
-        if not hmac.compare_digest(supplied_token.encode("utf-8"), configured_token.encode("utf-8")):
-            return jsonify({"error": "A valid X-Scan-Token header is required."}), 401
     return None
 
 
