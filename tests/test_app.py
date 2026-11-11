@@ -3,14 +3,34 @@ import json
 import pytest
 import importlib
 import socket
+import base64
 from types import SimpleNamespace
 
 app_module = importlib.import_module("app.app")
 app = app_module.app
 
 
-def test_home_page():
+TEST_USERNAME = "test-admin"
+TEST_PASSWORD = "test-password"
+
+
+@pytest.fixture(autouse=True)
+def configure_dashboard_auth(monkeypatch):
+    monkeypatch.setenv("DASHBOARD_USERNAME", TEST_USERNAME)
+    monkeypatch.setenv("DASHBOARD_PASSWORD", TEST_PASSWORD)
+
+
+def authenticated_client():
     client = app.test_client()
+    credentials = base64.b64encode(
+        f"{TEST_USERNAME}:{TEST_PASSWORD}".encode()
+    ).decode()
+    client.environ_base["HTTP_AUTHORIZATION"] = f"Basic {credentials}"
+    return client
+
+
+def test_home_page():
+    client = authenticated_client()
 
     response = client.get("/")
 
@@ -32,7 +52,7 @@ def test_health_check():
 
 
 def test_api_info():
-    client = app.test_client()
+    client = authenticated_client()
 
     response = client.get("/api/info")
 
@@ -44,8 +64,9 @@ def test_api_info():
     assert data["status"] == "running"
 
 
+
 def test_scan_repository(monkeypatch, tmp_path):
-    client = app.test_client()
+    client = authenticated_client()
 
     # Create a temporary fake repository.
     clone_root = tmp_path / "clone"
@@ -131,7 +152,7 @@ def test_scan_container(monkeypatch):
             "rule_id": "CVE-TEST-1",
         }],
     )
-    client = app.test_client()
+    client = authenticated_client()
     response = client.post(
         "/api/scan",
         json={"target": "nginx:1.27", "scan_type": "container"},
@@ -145,7 +166,7 @@ def test_scan_container(monkeypatch):
 
 
 def test_scan_endpoint_blocks_private_target():
-    client = app.test_client()
+    client = authenticated_client()
     response = client.post(
         "/api/scan",
         json={"target": "http://localhost:5000", "scan_type": "endpoint"},
@@ -168,7 +189,7 @@ def test_public_endpoint_url_validation_blocks_local_addresses():
 
 
 def test_scan_rejects_empty_target():
-    client = app.test_client()
+    client = authenticated_client()
 
     response = client.post(
         "/api/scan",
@@ -183,7 +204,7 @@ def test_scan_rejects_empty_target():
 
 
 def test_scan_rejects_invalid_scan_type():
-    client = app.test_client()
+    client = authenticated_client()
 
     response = client.post(
         "/api/scan",
@@ -257,7 +278,7 @@ def test_finding_statistics_count_severity_and_source():
 
 
 def test_scan_rejects_oversized_target():
-    client = app.test_client()
+    client = authenticated_client()
     response = client.post(
         "/api/scan",
         json={"target": "x" * 2049, "scan_type": "repo"},
@@ -266,7 +287,7 @@ def test_scan_rejects_oversized_target():
     assert "2048 characters" in response.get_json()["error"]
 
 def test_repository_scan_returns_500_when_gitleaks_fails(monkeypatch):
-    client = app.test_client()
+    client = authenticated_client()
 
     def fake_clone(repository_url):
         return {
@@ -297,7 +318,7 @@ def test_repository_scan_returns_500_when_gitleaks_fails(monkeypatch):
 
 
 def test_repository_scan_returns_500_when_trivy_fails(monkeypatch):
-    client = app.test_client()
+    client = authenticated_client()
 
     def fake_clone(repository_url):
         return {
@@ -441,27 +462,42 @@ def test_endpoint_redirect_is_not_followed(monkeypatch):
     assert any(item["rule_id"] == "http-redirect-not-followed" for item in findings)
 
 
-def test_scan_api_requires_token_when_configured(monkeypatch):
-    monkeypatch.setenv("ENVIRONMENT", "development")
-    monkeypatch.setenv("SCAN_API_TOKEN", "test-secret-token")
-    monkeypatch.setattr(app_module, "run_trivy_image_scan", lambda image: [])
+def test_dashboard_requires_authentication():
     client = app.test_client()
-    response = client.post("/api/scan", json={"target": "nginx:1.27", "scan_type": "container"})
+    response = client.get("/")
     assert response.status_code == 401
-    response = client.post(
-        "/api/scan",
-        json={"target": "nginx:1.27", "scan_type": "container"},
-        headers={"X-Scan-Token": "test-secret-token"},
+    assert "WWW-Authenticate" in response.headers
+
+
+def test_dashboard_rejects_invalid_credentials():
+    client = app.test_client()
+    response = client.get(
+        "/",
+        headers={"Authorization": "Basic invalid"},
     )
+    assert response.status_code == 401
+
+
+def test_dashboard_accepts_valid_credentials():
+    client = authenticated_client()
+    response = client.get("/")
     assert response.status_code == 200
+    assert b"CodeShield" in response.data
+
+
+def test_health_is_public():
+    client = app.test_client()
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.get_json()["status"] == "healthy"
 
 
 def test_scan_api_has_security_headers():
-    response = app.test_client().get("/health")
+    response = authenticated_client().get("/health")
     assert response.headers["X-Content-Type-Options"] == "nosniff"
     assert response.headers["X-Frame-Options"] == "DENY"
     assert "frame-ancestors 'none'" in response.headers["Content-Security-Policy"]
-    scan_response = app.test_client().post("/api/scan", json={})
+    scan_response = authenticated_client().post("/api/scan", json={})
     assert scan_response.headers["Cache-Control"] == "no-store"
 
 
@@ -520,7 +556,7 @@ def test_scan_api_rate_limits_requests(monkeypatch):
     monkeypatch.setenv("SCAN_RATE_LIMIT_REQUESTS", "1")
     monkeypatch.setenv("SCAN_RATE_LIMIT_WINDOW_SECONDS", "60")
     monkeypatch.setattr(app_module, "run_trivy_image_scan", lambda image: [])
-    client = app.test_client()
+    client = authenticated_client()
     first = client.post(
         "/api/scan",
         json={"target": "nginx:1.27", "scan_type": "container"},
@@ -536,20 +572,18 @@ def test_scan_api_rate_limits_requests(monkeypatch):
     assert second.headers.get("Retry-After")
 
 
-def test_production_scan_api_requires_configured_token(monkeypatch):
-    monkeypatch.setenv("ENVIRONMENT", "production")
-    monkeypatch.delenv("SCAN_API_TOKEN", raising=False)
-    response = app.test_client().post(
-        "/api/scan",
-        json={"target": "nginx:1.27", "scan_type": "container"},
-        environ_overrides={"REMOTE_ADDR": "192.0.2.13"},
-    )
+def test_dashboard_authentication_requires_both_environment_variables(monkeypatch):
+    monkeypatch.delenv("DASHBOARD_USERNAME", raising=False)
+    monkeypatch.delenv("DASHBOARD_PASSWORD", raising=False)
+
+    response = app.test_client().get("/")
+
     assert response.status_code == 503
     assert "authentication is not configured" in response.get_json()["error"]
 
 
 def test_scan_rejects_non_object_json():
-    response = app.test_client().post("/api/scan", json=["not", "an", "object"])
+    response = authenticated_client().post("/api/scan", json=["not", "an", "object"])
     assert response.status_code == 400
     assert response.is_json
 
@@ -589,17 +623,13 @@ def test_trivy_image_timeout_returns_safe_error(monkeypatch):
 
 
 
-def test_production_scan_api_rejects_short_token(monkeypatch):
-    monkeypatch.setenv("ENVIRONMENT", "production")
-    monkeypatch.setenv("SCAN_API_TOKEN", "too-short")
-    response = app.test_client().post(
-        "/api/scan",
-        json={"target": "nginx:1.27", "scan_type": "container"},
-        environ_overrides={"REMOTE_ADDR": "192.0.2.14"},
-    )
-    assert response.status_code == 503
-    assert "at least 32 characters" in response.get_json()["error"]
+def test_dashboard_authentication_rejects_missing_password(monkeypatch):
+    monkeypatch.delenv("DASHBOARD_PASSWORD", raising=False)
 
+    response = app.test_client().get("/")
+
+    assert response.status_code == 503
+    assert "authentication is not configured" in response.get_json()["error"]
 
 
 def test_gitleaks_missing_report_is_not_treated_as_clean(monkeypatch, tmp_path):
