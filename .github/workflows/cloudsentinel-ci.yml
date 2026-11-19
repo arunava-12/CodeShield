@@ -54,34 +54,61 @@ jobs:
           vuln-type: 'os,library'
           severity: 'CRITICAL,HIGH'
 
+      # On codeshield-dev, show successful simulation steps only.
+      # These echo commands do not access AWS or perform a deployment.
       - name: Configure AWS credentials
+        if: github.ref == 'refs/heads/codeshield-dev'
+        run: echo "SIMULATION ONLY: Configure AWS credentials"
+
+      - name: Verify AWS identity
+        if: github.ref == 'refs/heads/codeshield-dev'
+        run: echo "SIMULATION ONLY: Verify AWS identity"
+
+      - name: Login to Amazon ECR
+        if: github.ref == 'refs/heads/codeshield-dev'
+        run: echo "SIMULATION ONLY: Login to Amazon ECR"
+
+      - name: Tag Docker image
+        if: github.ref == 'refs/heads/codeshield-dev'
+        run: echo "SIMULATION ONLY: Tag Docker image"
+
+      - name: Push Docker image to ECR
+        if: github.ref == 'refs/heads/codeshield-dev'
+        run: echo "SIMULATION ONLY: Push Docker image to ECR"
+
+      - name: Deploy to EC2 via SSM
+        if: github.ref == 'refs/heads/codeshield-dev'
+        run: echo "SIMULATION ONLY: Deploy to EC2 via SSM"
+
+      # Real AWS deployment remains enabled on main only.
+      - name: Configure AWS credentials (real deployment)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: arn:aws:iam::851725640243:role/CodeShield-github-actions-role
           aws-region: ap-south-1
 
-      - name: Verify AWS identity
+      - name: Verify AWS identity (real deployment)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: aws sts get-caller-identity
 
-      - name: Login to Amazon ECR
+      - name: Login to Amazon ECR (real deployment)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Tag Docker image
+      - name: Tag Docker image (real deployment)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           docker tag codeshield:test 851725640243.dkr.ecr.ap-south-1.amazonaws.com/codeshield:${{ github.sha }}
           docker tag codeshield:test 851725640243.dkr.ecr.ap-south-1.amazonaws.com/codeshield:latest
 
-      - name: Push Docker image to ECR
+      - name: Push Docker image to ECR (real deployment)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           docker push 851725640243.dkr.ecr.ap-south-1.amazonaws.com/codeshield:${{ github.sha }}
           docker push 851725640243.dkr.ecr.ap-south-1.amazonaws.com/codeshield:latest
 
-      - name: Deploy to EC2 via SSM
+      - name: Deploy to EC2 via SSM (real deployment)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           COMMAND_ID=$(aws ssm send-command \
