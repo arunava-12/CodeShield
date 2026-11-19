@@ -54,29 +54,76 @@ jobs:
           vuln-type: 'os,library'
           severity: 'CRITICAL,HIGH'
 
-      # Presentation-only placeholders for the codeshield-dev CI run.
-      # These steps do NOT authenticate to AWS, publish an image, or deploy EC2.
-      # The actual AWS deployment workflow remains in .github/workflows/deploy.yml.
-      - name: Configure AWS credentials (simulation only)
-        if: github.ref == 'refs/heads/codeshield-dev'
-        run: echo "SIMULATION ONLY: AWS credentials were not configured."
+      - name: Configure AWS credentials
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: arn:aws:iam::851725640243:role/CodeShield-github-actions-role
+          aws-region: ap-south-1
 
-      - name: Verify AWS identity (simulation only)
-        if: github.ref == 'refs/heads/codeshield-dev'
-        run: echo "SIMULATION ONLY: AWS identity was not verified."
+      - name: Verify AWS identity
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: aws sts get-caller-identity
 
-      - name: Login to Amazon ECR (simulation only)
-        if: github.ref == 'refs/heads/codeshield-dev'
-        run: echo "SIMULATION ONLY: No ECR login was performed."
+      - name: Login to Amazon ECR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Tag Docker image (simulation only)
-        if: github.ref == 'refs/heads/codeshield-dev'
-        run: echo "SIMULATION ONLY: No image was tagged for ECR."
+      - name: Tag Docker image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          docker tag codeshield:test 851725640243.dkr.ecr.ap-south-1.amazonaws.com/codeshield:${{ github.sha }}
+          docker tag codeshield:test 851725640243.dkr.ecr.ap-south-1.amazonaws.com/codeshield:latest
 
-      - name: Push Docker image to ECR (simulation only)
-        if: github.ref == 'refs/heads/codeshield-dev'
-        run: echo "SIMULATION ONLY: No image was pushed to ECR."
+      - name: Push Docker image to ECR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          docker push 851725640243.dkr.ecr.ap-south-1.amazonaws.com/codeshield:${{ github.sha }}
+          docker push 851725640243.dkr.ecr.ap-south-1.amazonaws.com/codeshield:latest
 
-      - name: Deploy to EC2 via SSM (simulation only)
-        if: github.ref == 'refs/heads/codeshield-dev'
-        run: echo "SIMULATION ONLY: No EC2 deployment or SSM command was executed."
+      - name: Deploy to EC2 via SSM
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          COMMAND_ID=$(aws ssm send-command \
+            --region ap-south-1 \
+            --instance-ids i-05798790401bee11c \
+            --document-name "AWS-RunShellScript" \
+            --parameters '{
+              "commands": [
+                "aws ecr get-login-password --region ap-south-1 | docker login --username AWS --password-stdin 851725640243.dkr.ecr.ap-south-1.amazonaws.com",
+                "docker pull 851725640243.dkr.ecr.ap-south-1.amazonaws.com/codeshield:${{ github.sha }}",
+                "docker rm -f codeshield || true",
+                "docker run -d --name codeshield -p 80:5000 --restart unless-stopped 851725640243.dkr.ecr.ap-south-1.amazonaws.com/codeshield:${{ github.sha }}",
+                "sleep 10",
+                "curl -fsS http://localhost/health"
+              ]
+            }' \
+            --query "Command.CommandId" \
+            --output text)
+
+          echo "SSM Command ID: $COMMAND_ID"
+
+          aws ssm wait command-executed \
+            --region ap-south-1 \
+            --command-id "$COMMAND_ID" \
+            --instance-id i-05798790401bee11c
+
+          STATUS=$(aws ssm get-command-invocation \
+            --region ap-south-1 \
+            --command-id "$COMMAND_ID" \
+            --instance-id i-05798790401bee11c \
+            --query "Status" \
+            --output text)
+
+          echo "Deployment status: $STATUS"
+
+          if [ "$STATUS" != "Success" ]; then
+            echo "EC2 deployment failed"
+            aws ssm get-command-invocation \
+              --region ap-south-1 \
+              --command-id "$COMMAND_ID" \
+              --instance-id i-05798790401bee11c
+            exit 1
+          fi
+
+          echo "EC2 deployment successful"
